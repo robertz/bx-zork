@@ -1,4 +1,4 @@
-# box-zork
+# bx-zork
 
 ![Zork I box art](zork1_cover.jpg)
 <br>*Zork I box art © Infocom, used here for reference under fair use; via [Wikipedia](https://en.wikipedia.org/wiki/Zork).*
