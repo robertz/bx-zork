@@ -29,6 +29,13 @@ function makeObject(id, name, synonyms, desc, takeable, options = {}) {
         // Current lit/burning state (ZIL's ONBIT) for light/flame sources —
         // distinct from `open`, which is about containers/doors.
         "on"          : options.on ?: false,
+        // Remaining lit-turns before this light source burns out for good
+        // (LAMP-TABLE/CANDLE-TABLE); -1 means no fuel timer (torch, most
+        // objects). Decremented once per turn while `on`, in tickLightFuel().
+        "fuel"        : options.fuel ?: -1,
+        // ZIL's RMUNGBIT: fuel hit 0 and this light source is permanently
+        // dead — can't be relit, distinct from just being switched `off`.
+        "burnedOut"   : options.burnedOut ?: false,
         "readable"    : options.readable ?: false,
         "text"        : options.text ?: "",
         "noTakeMessage": options.noTakeMessage ?: "",
@@ -259,7 +266,10 @@ No computer should be without one!""",
     "brass_lantern" : makeObject(
         "brass_lantern", "brass lantern", [ "lamp", "lantern", "light" ],
         "A battery-powered brass lantern is on the trophy case.", true,
-        { "adjectives" : [ "brass" ], "light" : true, "location" : "living_room" }
+        { "adjectives" : [ "brass" ], "light" : true, "location" : "living_room",
+          // LAMP-TABLE: 100+70+15 lit turns before burning out for good,
+          // with a dimmer warning at each stage boundary (tickLightFuel).
+          "fuel" : 185 }
     ),
     "sword" : makeObject(
         "sword", "sword", [ "sword", "orcrist", "glamdring", "blade" ],
@@ -646,7 +656,11 @@ on your right that....",
         "match", "matchbook", [ "match", "matches", "matchbook" ],
         "There is a matchbook whose cover says ""Visit Beautiful FCD##3"" here.", true,
         {
-            "adjectives" : [ "match" ], "readable" : true, "burnable" : true, "size" : 2,
+            // light:true so a burning match counts as a light source
+            // (findLitLightSource); MATCH-FUNCTION's 2-turn burn is tracked
+            // via `fuel` (tickMatch, zorkParser.bxs) rather than the
+            // dimmer-stage table the lamp/candles use.
+            "adjectives" : [ "match" ], "readable" : true, "burnable" : true, "light" : true, "size" : 2,
             "text" :
 "
 (Close cover before striking)
@@ -898,7 +912,10 @@ wound down.",
     "candles" : makeObject(
         "candles", "pair of candles", [ "candles", "pair" ],
         "On the two ends of the altar are burning candles.", true,
-        { "adjectives" : [ "burning" ], "light" : true, "on" : true, "size" : 10, "location" : "south_temple" }
+        { "adjectives" : [ "burning" ], "light" : true, "on" : true, "size" : 10, "location" : "south_temple",
+          // CANDLE-TABLE: 20+10+5 lit turns. They start lit, so this counts
+          // down from the very first turn, same as real ZIL's QUEUE I-CANDLES.
+          "fuel" : 35 }
     ),
     "map" : makeObject(
         "map", "ancient map", [ "parchment", "map" ],
@@ -926,7 +943,7 @@ southwest, is marked ""To Stone Barrow"".",
     "broken_lamp" : makeObject(
         "broken_lamp", "broken lantern", [ "lamp", "lantern" ], "", true,
         { "adjectives" : [ "broken" ], "location" : "",
-          "note" : "TODO: replaces `brass_lantern` if it's thrown/burns out (Task 6); not placed until then." }
+          "note" : "TODO: per LANTERN's THROW case, only smashing the lamp produces this (burning out via fuel exhaustion just leaves brass_lantern in place, permanently unlightable — see brass_lantern.burnedOut). Not placed until a throw verb exists." }
     ),
 
     // --- Endgame (Stone Barrow) -----------------------------------------------------

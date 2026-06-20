@@ -156,7 +156,9 @@ gameState = {
     // Set by handleLaunch() for the turn it's called on, so tickRiver()
     // doesn't also drift the boat downstream the same turn it enters the
     // river (see I-RIVER's queue timing in 1actions.zil).
-    "skipRiverDriftThisTurn" : false
+    "skipRiverDriftThisTurn" : false,
+    // MATCH-COUNT: matches remaining in the matchbook (handleStrikeMatch).
+    "matchCount" : 6
 };
 
 function buildVerbIndex() {
@@ -949,8 +951,14 @@ function handleTurnOn(obj) {
     if ( obj.id == "machine" || obj.id == "machine_switch" ) {
         return runCoalMachine();
     }
+    if ( obj.id == "match" ) {
+        return handleStrikeMatch();
+    }
     if ( !obj.light ) {
         return "You can't turn that on.";
+    }
+    if ( obj.burnedOut ) {
+        return "A burned-out #obj.name# won't light.";
     }
     if ( obj.on ) {
         return "It's already on.";
@@ -960,14 +968,41 @@ function handleTurnOn(obj) {
 }
 
 function handleExtinguish(obj) {
+    if ( obj.id == "match" ) {
+        if ( !obj.on ) {
+            return "It's already out.";
+        }
+        obj.on = false;
+        obj.fuel = -1;
+        return "The match is out.";
+    }
     if ( !obj.light ) {
         return "You can't turn that off.";
+    }
+    if ( obj.burnedOut ) {
+        return "The #obj.name# has already burned out.";
     }
     if ( !obj.on ) {
         return "It's already off.";
     }
     obj.on = false;
     return "The #obj.name# is now off.";
+}
+
+// MATCH-FUNCTION: strikes a fresh match off the matchbook. Six per game
+// (gameState.matchCount); each burns for exactly 2 turns (tickMatch) unless
+// put out early, and goes out instantly in a drafty room.
+function handleStrikeMatch() {
+    if ( gameState.matchCount <= 0 ) {
+        return "I'm afraid that you have run out of matches.";
+    }
+    gameState.matchCount -= 1;
+    if ( [ "lower_shaft", "timber_room" ].contains( gameState.currentRoom ) ) {
+        return "This room is drafty, and the match goes out instantly.";
+    }
+    objects.match.on = true;
+    objects.match.fuel = 2;
+    return "One of the matches starts to burn.";
 }
 
 // "light X" turns on a light source, or sets fire to a burnable one —
@@ -982,6 +1017,9 @@ function handleLight(obj) {
             }
         }
         return result;
+    }
+    if ( obj.id == "match" ) {
+        return handleStrikeMatch();
     }
     if ( obj.light ) {
         return handleTurnOn( obj );
@@ -1343,6 +1381,71 @@ function checkEndgameTrigger() {
         return NEWLINE & "An almost inaudible voice whispers in your ear, ""Look to your treasures for the final secret.""";
     }
     return "";
+}
+
+// Whether obj's fuel-stage messages should actually print this turn —
+// ZIL's LIGHT-INT only tells you about a light source you're holding or
+// standing next to, even though the underlying countdown always runs.
+function lightSourceVisible(obj) {
+    return obj.location == "player" || obj.location == gameState.currentRoom;
+}
+
+// LAMP-TABLE/CANDLE-TABLE: decrements brass_lantern/candles' fuel once per
+// turn while lit, printing a dimmer warning at each stage boundary and
+// permanently burning the light source out (RMUNGBIT) when fuel runs out.
+// Simplified from ZIL's interrupt-queue table mechanics to a flat
+// turn-counter — same text and stage thresholds, fewer moving parts.
+LIGHT_FUEL_STAGES = {
+    "brass_lantern" : {
+        85 : "The lamp appears a bit dimmer.",
+        15 : "The lamp is definitely dimmer now.",
+        0  : "The lamp is nearly out."
+    },
+    "candles" : {
+        15 : "The candles grow shorter.",
+        5  : "The candles are becoming quite short.",
+        0  : "The candles won't last long now."
+    }
+};
+
+function tickLightFuel() {
+    var notes = [];
+    for ( var id in LIGHT_FUEL_STAGES ) {
+        var obj = objects[ id ];
+        if ( !obj.on || obj.fuel < 0 ) {
+            continue;
+        }
+        obj.fuel -= 1;
+        var visible = lightSourceVisible( obj );
+        if ( obj.fuel < 0 ) {
+            obj.on = false;
+            obj.burnedOut = true;
+            if ( visible ) {
+                notes.append( "You'd better have more light than from the #obj.name#." );
+            }
+            continue;
+        }
+        var stages = LIGHT_FUEL_STAGES[ id ];
+        if ( visible && stages.keyExists( obj.fuel ) ) {
+            notes.append( stages[ obj.fuel ] );
+        }
+    }
+    return notes.toList( NEWLINE );
+}
+
+// MATCH-FUNCTION's 2-turn burn: a struck match goes out on its own unless
+// extinguished first.
+function tickMatch() {
+    if ( !objects.match.on ) {
+        return "";
+    }
+    objects.match.fuel -= 1;
+    if ( objects.match.fuel >= 0 ) {
+        return "";
+    }
+    objects.match.on = false;
+    objects.match.fuel = -1;
+    return lightSourceVisible( objects.match ) ? "The match has gone out." : "";
 }
 
 // Applies a blow outcome to the player; returns "" normally, or a death
@@ -2029,6 +2132,16 @@ function processCommand(input) {
         if ( thiefNote.len() ) {
             result &= NEWLINE & thiefNote;
         }
+    }
+
+    var lightFuelNote = tickLightFuel();
+    if ( lightFuelNote.len() ) {
+        result &= NEWLINE & lightFuelNote;
+    }
+
+    var matchNote = tickMatch();
+    if ( matchNote.len() ) {
+        result &= NEWLINE & matchNote;
     }
 
     var endgameNote = checkEndgameTrigger();

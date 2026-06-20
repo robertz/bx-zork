@@ -142,12 +142,38 @@ putty path (`FIX-BOAT`), and walking onto river rooms without the boat is
 disallowed simply because the data has no walkable exit into them (matching
 `NONLANDBIT` in practice) rather than via an explicit engine-level check.
 
+### Light source fuel timers
+`brass_lantern` (185 lit turns) and `candles` (35, already lit at game
+start) now run down once per turn while on, via `tickLightFuel()`
+(`zorkParser.bxs`) — a flat per-object `fuel` counter standing in for
+ZIL's `LAMP-TABLE`/`CANDLE-TABLE` interrupt-queue mechanics, with the same
+text and stage thresholds (warnings at 100/170 turns used for the lamp,
+20/30 for the candles, permanent burnout one turn after the final
+warning). A burned-out light source (`burnedOut`) can never be relit.
+`match` (`gameState.matchCount`, 6 per game) is handled separately —
+`handleStrikeMatch()` ports `MATCH-FUNCTION` verbatim: each strike burns
+for exactly 2 turns (`tickMatch()`) unless put out early, goes out
+instantly in `lower_shaft`/`timber_room` (still consuming the match), and
+refuses once the matchbook is empty. Warnings/burnout messages only print
+when the light source is actually held or in the player's room
+(`lightSourceVisible()`), matching ZIL's `HELD?`/`IN HERE` check, but the
+countdown itself always runs in the background, matching ZIL's demon.
+
+Not modeled: `torch` has no timer (real ZIL doesn't give it one either —
+it's the one light source that never runs out). There's also still no
+darkness/visibility system in this engine at all — running out of light
+doesn't currently affect what you can see or do; it's flavor-only. That's
+a separate, larger gap than "light sources should run out," and is
+deliberately out of scope here.
+
 ## Genuinely unimplemented
 
 ### Other single-item gaps
-- `broken_lamp` (`zorkData.bxs:909`) — should replace `brass_lantern` if
-  it's thrown or burns out; never placed. (Relatedly: there's no lamp/match/
-  candle fuel-timer system at all — light sources don't run out.)
+- `broken_lamp` (`zorkData.bxs:943`) — per ZIL's `LANTERN` routine, this is
+  produced only by *throwing* the lamp, not by fuel exhaustion (a burned-
+  out lamp just stays in place, permanently dead — see `brass_lantern`'s
+  `burnedOut` flag, now implemented). Stays unplaced until a `throw` verb
+  exists.
 - `teeth`, `wall`, `granite_wall` (`zorkData.bxs:72,77,82`) — ZIL
   `GLOBAL-OBJECTS` scenery kept for vocabulary/flavor only; intentionally
   not wired to any room.
