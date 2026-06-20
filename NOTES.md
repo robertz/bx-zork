@@ -192,11 +192,16 @@ when the light source is actually held or in the player's room
 countdown itself always runs in the background, matching ZIL's demon.
 
 Not modeled: `torch` has no timer (real ZIL doesn't give it one either —
-it's the one light source that never runs out). There's also still no
-darkness/visibility system in this engine at all — running out of light
-doesn't currently affect what you can see or do; it's flavor-only. That's
-a separate, larger gap than "light sources should run out," and is
-deliberately out of scope here.
+it's the one light source that never runs out).
+
+Darkness/visibility is now fully implemented — see `roomIsLit()` in
+`zorkParser.bxs`. Rooms with `"lit": true` (all outdoor/above-ground rooms
+and the house interior) are always lit. Underground rooms require a carried
+or in-room light source. In darkness: `describeRoom()` shows the pitch-black
+message, `getVisibleObjectIds()` restricts scope to carried items only (so
+room objects are invisible and untouchable), and `tickGrue()` fires each turn
+after a 2-turn grace period with ZIL-faithful probabilities (65% harmless
+warning, ~17% grue description, ~17% death via `endGame()`).
 
 ### Throw
 New `throw`/`hurl`/`chuck`/`toss` verb (`handleThrow`, `zorkParser.bxs`,

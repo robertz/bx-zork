@@ -964,6 +964,7 @@ rooms = {
 
     "west_of_house" : {
         "id"          : "west_of_house",
+        "lit"         : true,
         "name"        : "West of House",
         "description" : "You are standing in an open field west of a white house, with a boarded front door.",
         "exits"       : {
@@ -987,6 +988,7 @@ rooms = {
     // in this room.
     "stone_barrow" : {
         "id"          : "stone_barrow",
+        "lit"         : true,
         "name"        : "Stone Barrow",
         "description" :
 "You are standing in front of a massive barrow of stone. In the east face
@@ -1014,6 +1016,7 @@ is completed in ""ZORK III: The Dungeon Master."""
 
     "north_of_house" : {
         "id"          : "north_of_house",
+        "lit"         : true,
         "name"        : "North of House",
         "description" :
 "You are facing the north side of a white house. There is no door here,
@@ -1031,6 +1034,7 @@ the trees.",
 
     "south_of_house" : {
         "id"          : "south_of_house",
+        "lit"         : true,
         "name"        : "South of House",
         "description" :
 "You are facing the south side of a white house. There is no door here,
@@ -1048,6 +1052,7 @@ and all the windows are boarded.",
     // ZIL's internal name is EAST-OF-HOUSE; DESC is "Behind House".
     "behind_house" : {
         "id"          : "behind_house",
+        "lit"         : true,
         "name"        : "Behind House",
         "dynamicDescription" : (allObjects) => {
             var windowState = allObjects.kitchen_window.open ? "open." : "slightly ajar.";
@@ -1068,6 +1073,7 @@ which is " & windowState;
 
     "forest_1" : {
         "id"          : "forest_1",
+        "lit"         : true,
         "name"        : "Forest",
         "description" :
 "This is a forest, with trees in all directions. To the east,
@@ -1083,6 +1089,7 @@ there appears to be sunlight.",
 
     "forest_2" : {
         "id"          : "forest_2",
+        "lit"         : true,
         "name"        : "Forest",
         "description" : "This is a dimly lit forest, with large trees all around.",
         "exits"       : {
@@ -1096,6 +1103,7 @@ there appears to be sunlight.",
 
     "mountains" : {
         "id"          : "mountains",
+        "lit"         : true,
         "name"        : "Forest",
         "description" : "The forest thins out, revealing impassable mountains.",
         "exits"       : {
@@ -1109,6 +1117,7 @@ there appears to be sunlight.",
 
     "forest_3" : {
         "id"          : "forest_3",
+        "lit"         : true,
         "name"        : "Forest",
         "description" : "This is a dimly lit forest, with large trees all around.",
         "exits"       : {
@@ -1123,6 +1132,7 @@ there appears to be sunlight.",
 
     "path" : {
         "id"          : "path",
+        "lit"         : true,
         "name"        : "Forest Path",
         "description" :
 "This is a path winding through a dimly lit forest. The path heads
@@ -1139,6 +1149,7 @@ stands at the edge of the path.",
 
     "up_a_tree" : {
         "id"          : "up_a_tree",
+        "lit"         : true,
         "name"        : "Up a Tree",
         "description" :
 "You are about 10 feet above the ground nestled among some large
@@ -1152,6 +1163,7 @@ branches. The nearest branch above you is above your reach.",
     // ZIL's GRATING-CLEARING (DESC "Clearing", distinct from CLEARING below).
     "grating_clearing" : {
         "id"          : "grating_clearing",
+        "lit"         : true,
         "name"        : "Clearing",
         "dynamicDescription" : (allObjects) => {
             var text = "You are in a clearing, with a forest surrounding you on all sides. A
@@ -1174,6 +1186,7 @@ path leads south.";
 
     "clearing" : {
         "id"          : "clearing",
+        "lit"         : true,
         "name"        : "Clearing",
         "description" :
 "You are in a small clearing in a well marked forest path that
@@ -1189,6 +1202,7 @@ extends to the east and west.",
 
     "kitchen" : {
         "id"          : "kitchen",
+        "lit"         : true,
         "name"        : "Kitchen",
         "dynamicDescription" : (allObjects) => {
             var windowState = allObjects.kitchen_window.open ? "open." : "slightly ajar.";
@@ -1211,6 +1225,7 @@ window which is " & windowState;
 
     "attic" : {
         "id"          : "attic",
+        "lit"         : true,
         "name"        : "Attic",
         "description" : "This is the attic. The only exit is a stairway leading down.",
         "exits"       : {
@@ -1220,6 +1235,7 @@ window which is " & windowState;
 
     "living_room" : {
         "id"          : "living_room",
+        "lit"         : true,
         "name"        : "Living Room",
         // Matches LIVING-ROOM-FCN's branching exactly: doorway text depends
         // on magicFlag, and the rug/trap-door clause depends on rugMoved
@@ -1833,7 +1849,7 @@ which leads into darkness. You probably could not get back up it.",
     // --- Flood Control Dam #3 -----------------------------------------------
 
     "dam_room" : {
-        "id" : "dam_room", "name" : "Dam",
+        "id" : "dam_room", "lit" : true, "name" : "Dam",
         // DAM-ROOM-FCN's M-LOOK: verbatim 4-state matrix over
         // lowTide x gatesOpen, plus the glowing-bubble GATE-FLAG detail.
         "dynamicDescription" : () => {
@@ -1862,7 +1878,7 @@ Directly above the bolt is a small green plastic bubble" &
         "exits" : { "south" : "deep_canyon", "down" : "dam_base", "east" : "dam_base", "north" : "dam_lobby", "west" : "reservoir_south" }
     },
     "dam_lobby" : {
-        "id" : "dam_lobby", "name" : "Dam Lobby",
+        "id" : "dam_lobby", "lit" : true, "name" : "Dam Lobby",
         "description" :
 "This room appears to have been the waiting room for groups touring
 the dam. There are open doorways here to the north and east marked
@@ -1874,7 +1890,7 @@ the dam. There are open doorways here to the north and east marked
         }
     },
     "maintenance_room" : {
-        "id" : "maintenance_room", "name" : "Maintenance Room",
+        "id" : "maintenance_room", "lit" : true, "name" : "Maintenance Room",
         "description" :
 "This is what appears to have been the maintenance room for Flood
 Control Dam ##3. Apparently, this room has been ransacked recently, for
@@ -1887,7 +1903,7 @@ the west and south.",
     // --- River area -----------------------------------------------------------
 
     "dam_base" : {
-        "id" : "dam_base", "name" : "Dam Base",
+        "id" : "dam_base", "lit" : true, "name" : "Dam Base",
         "description" :
 "You are at the base of Flood Control Dam ##3, which looms above you
 and to the north. The river Frigid is flowing by here. Along the
@@ -1897,7 +1913,7 @@ way downstream.",
         "exits" : { "north" : "dam_room", "up" : "dam_room" }
     },
     "river_1" : {
-        "id" : "river_1", "name" : "Frigid River",
+        "id" : "river_1", "lit" : true, "name" : "Frigid River",
         "description" :
 "You are on the Frigid River in the vicinity of the Dam. The river
 flows quietly here. There is a landing on the west shore.",
@@ -1908,7 +1924,7 @@ flows quietly here. There is a landing on the west shore.",
         }
     },
     "river_2" : {
-        "id" : "river_2", "name" : "Frigid River",
+        "id" : "river_2", "lit" : true, "name" : "Frigid River",
         "description" :
 "The river turns a corner here making it impossible to see the
 Dam. The White Cliffs loom on the east bank and large rocks prevent
@@ -1922,7 +1938,7 @@ landing on the west.",
         }
     },
     "river_3" : {
-        "id" : "river_3", "name" : "Frigid River",
+        "id" : "river_3", "lit" : true, "name" : "Frigid River",
         "description" :
 "The river descends here into a valley. There is a narrow beach on the
 west shore below the cliffs. In the distance a faint rumbling can be
@@ -1933,7 +1949,7 @@ heard.",
         }
     },
     "white_cliffs_north" : {
-        "id" : "white_cliffs_north", "name" : "White Cliffs Beach",
+        "id" : "white_cliffs_north", "lit" : true, "name" : "White Cliffs Beach",
         "description" :
 "You are on a narrow strip of beach which runs along the base of the
 White Cliffs. There is a narrow path heading south along the Cliffs
@@ -1944,7 +1960,7 @@ and a tight passage leading west into the cliffs themselves.",
         }
     },
     "white_cliffs_south" : {
-        "id" : "white_cliffs_south", "name" : "White Cliffs Beach",
+        "id" : "white_cliffs_south", "lit" : true, "name" : "White Cliffs Beach",
         "description" :
 "You are on a rocky, narrow strip of beach beside the Cliffs. A
 narrow path leads north along the shore.",
@@ -1953,7 +1969,7 @@ narrow path leads north along the shore.",
         }
     },
     "river_4" : {
-        "id" : "river_4", "name" : "Frigid River",
+        "id" : "river_4", "lit" : true, "name" : "Frigid River",
         "description" :
 "The river is running faster here and the sound ahead appears to be
 that of rushing water. On the east shore is a sandy beach. A small
@@ -1966,7 +1982,7 @@ area of beach can also be seen below the cliffs on the west shore.",
         }
     },
     "river_5" : {
-        "id" : "river_5", "name" : "Frigid River",
+        "id" : "river_5", "lit" : true, "name" : "Frigid River",
         "description" :
 "The sound of rushing water is nearly unbearable here. On the east
 shore is a large landing area.",
@@ -1976,7 +1992,7 @@ shore is a large landing area.",
         }
     },
     "shore" : {
-        "id" : "shore", "name" : "Shore",
+        "id" : "shore", "lit" : true, "name" : "Shore",
         "description" :
 "You are on the east shore of the river. The water here seems somewhat
 treacherous. A path travels from north to south here, the south end
@@ -1984,7 +2000,7 @@ quickly turning around a sharp corner.",
         "exits" : { "north" : "sandy_beach", "south" : "aragain_falls" }
     },
     "sandy_beach" : {
-        "id" : "sandy_beach", "name" : "Sandy Beach",
+        "id" : "sandy_beach", "lit" : true, "name" : "Sandy Beach",
         "description" :
 "You are on a large sandy beach on the east shore of the river, which is
 flowing quickly by. A path runs beside the river to the south here, and
@@ -1997,7 +2013,7 @@ a passage is partially buried in sand to the northeast.",
         "exits" : { "sw" : "sandy_beach" }
     },
     "aragain_falls" : {
-        "id" : "aragain_falls", "name" : "Aragain Falls",
+        "id" : "aragain_falls", "lit" : true, "name" : "Aragain Falls",
         "dynamicDescription" : () => {
             var text = "You are at the top of Aragain Falls, an enormous waterfall with a
 drop of about 450 feet. The only path here is on the north end.";
@@ -2014,7 +2030,7 @@ drop of about 450 feet. The only path here is on the north end.";
         }
     },
     "on_rainbow" : {
-        "id" : "on_rainbow", "name" : "On the Rainbow",
+        "id" : "on_rainbow", "lit" : true, "name" : "On the Rainbow",
         "description" :
 "You are on top of a rainbow (I bet you never thought you would walk
 on a rainbow), with a magnificent view of the Falls. The rainbow
@@ -2022,7 +2038,7 @@ travels east-west here.",
         "exits" : { "west" : "end_of_rainbow", "east" : "aragain_falls" }
     },
     "end_of_rainbow" : {
-        "id" : "end_of_rainbow", "name" : "End of Rainbow",
+        "id" : "end_of_rainbow", "lit" : true, "name" : "End of Rainbow",
         "description" :
 "You are on a small, rocky beach on the continuation of the Frigid
 River past the Falls. The beach is narrow due to the presence of the
@@ -2037,7 +2053,7 @@ path continues to the southwest.",
         }
     },
     "canyon_bottom" : {
-        "id" : "canyon_bottom", "name" : "Canyon Bottom",
+        "id" : "canyon_bottom", "lit" : true, "name" : "Canyon Bottom",
         "description" :
 "You are beneath the walls of the river canyon which may be climbable
 here. The lesser part of the runoff of Aragain Falls flows by below.
@@ -2045,7 +2061,7 @@ To the north is a narrow path.",
         "exits" : { "up" : "cliff_middle", "north" : "end_of_rainbow" }
     },
     "cliff_middle" : {
-        "id" : "cliff_middle", "name" : "Rocky Ledge",
+        "id" : "cliff_middle", "lit" : true, "name" : "Rocky Ledge",
         "description" :
 "You are on a ledge about halfway up the wall of the river canyon.
 You can see from here that the main flow from Aragain Falls twists
@@ -2055,7 +2071,7 @@ climbable.",
         "exits" : { "up" : "canyon_view", "down" : "canyon_bottom" }
     },
     "canyon_view" : {
-        "id" : "canyon_view", "name" : "Canyon View",
+        "id" : "canyon_view", "lit" : true, "name" : "Canyon View",
         "description" :
 "You are at the top of the Great Canyon on its west wall. From here
 there is a marvelous view of the canyon and parts of the Frigid River
@@ -2075,7 +2091,7 @@ the canyon from here.",
     // --- Coal mine area ---------------------------------------------------------
 
     "mine_entrance" : {
-        "id" : "mine_entrance", "name" : "Mine Entrance",
+        "id" : "mine_entrance", "lit" : true, "name" : "Mine Entrance",
         "description" :
 "You are standing at the entrance of what might have been a coal mine.
 The shaft enters the west wall, and there is another exit on the south

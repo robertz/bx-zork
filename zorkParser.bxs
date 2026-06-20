@@ -178,7 +178,11 @@ gameState = {
     // river (see I-RIVER's queue timing in 1actions.zil).
     "skipRiverDriftThisTurn" : false,
     // MATCH-COUNT: matches remaining in the matchbook (handleStrikeMatch).
-    "matchCount" : 6
+    "matchCount" : 6,
+    // GRUE-FUNCTION's turn counter: increments each turn you spend in
+    // darkness, resets to 0 when you re-enter light. The grue first fires
+    // after 2 dark turns (matching ZIL's INT-DEF I-GRUE delay of 2).
+    "grueCounter" : 0
 };
 
 function buildVerbIndex() {
@@ -280,9 +284,29 @@ function sliceWords(words, start, count) {
     return count > 0 ? words.slice( start, count ) : [];
 }
 
+// ZIL's LIGHT-INT: room is lit if it has a natural LFLAG (outdoor/above-ground)
+// or a lit, non-burned-out light source is in the room or carried by the player.
+function roomIsLit() {
+    var room = rooms[ gameState.currentRoom ];
+    if ( room.keyExists( "lit" ) && room.lit ) {
+        return true;
+    }
+    for ( var id in objects ) {
+        var obj = objects[ id ];
+        if ( !obj.light || !obj.on || obj.burnedOut ) {
+            continue;
+        }
+        if ( obj.location == "player" || obj.location == gameState.currentRoom ) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Objects visible/reachable right now: things located in the current room,
 // things carried, the (open or transparent) contents of either, plus any
 // scenery objects that declare the current room in their globalIn list.
+// In darkness, only carried items are visible — room contents are unseen.
 function getVisibleObjectIds(currentRoomId) {
     var visible = [];
 
@@ -297,6 +321,16 @@ function getVisibleObjectIds(currentRoomId) {
                 addContainerContents( objectId );
             }
         }
+    }
+
+    if ( !roomIsLit() ) {
+        for ( var objectId in objects ) {
+            if ( objects[ objectId ].location == "player" && !objects[ objectId ].hidden ) {
+                visible.append( objectId );
+                addContainerContents( objectId );
+            }
+        }
+        return visible;
     }
 
     for ( var objectId in objects ) {
@@ -370,6 +404,10 @@ function resolveObject(words, currentRoomId) {
 function describeRoom(room) {
     var lines = [];
     lines.append( room.name );
+    if ( !roomIsLit() ) {
+        lines.append( "It is pitch black." );
+        return lines.toList( NEWLINE );
+    }
     lines.append( room.keyExists( "dynamicDescription" ) ? room.dynamicDescription( objects ) : room.description );
 
     var presentIds = objects.keyArray().filter( (id) => objects[ id ].location == room.id && !objects[ id ].scenery && !objects[ id ].hidden );
@@ -1500,6 +1538,28 @@ function tickMatch() {
     return lightSourceVisible( objects.match ) ? "The match has gone out." : "";
 }
 
+// GRUE-FUNCTION/I-GRUE: fires each turn you remain in darkness after a 2-turn
+// grace period. Probabilities verbatim from ZIL's GRUE-FCN: 65% harmless warning,
+// ~17% grue description, ~17% death. Counter resets to 0 whenever you re-enter light.
+function tickGrue() {
+    if ( roomIsLit() ) {
+        gameState.grueCounter = 0;
+        return "";
+    }
+    gameState.grueCounter += 1;
+    if ( gameState.grueCounter < 3 ) {
+        return "";
+    }
+    var roll = randRange( 1, 100 );
+    if ( roll <= 65 ) {
+        return "You are likely to be eaten by a grue.";
+    } else if ( roll <= 82 ) {
+        return "The grue is a sinister, lurking presence in the dark places of the earth. Its favorite diet is adventurers, but its insatiable appetite is tempered by its fear of light. No grue has ever been seen by the light of day, and few have survived its fearsome jaws to tell the tale.";
+    } else {
+        return endGame( "Oh, no! You have walked into the slavering fangs of a lurking grue!" );
+    }
+}
+
 // I-RFILL/I-REMPTY: the reservoir doesn't drain/refill the instant the bolt
 // is turned — GATES-OPEN just starts an 8-turn countdown, after which
 // lowTide flips to match it. Mirrors the bare-bones plumbing of those two
@@ -2342,6 +2402,13 @@ function processCommand(input) {
     var matchNote = tickMatch();
     if ( matchNote.len() ) {
         result &= NEWLINE & matchNote;
+    }
+
+    if ( !gameState.playerDead ) {
+        var grueNote = tickGrue();
+        if ( grueNote.len() ) {
+            result &= NEWLINE & grueNote;
+        }
     }
 
     var damNote = tickDam();
