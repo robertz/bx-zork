@@ -38,7 +38,7 @@ ZERO_OBJECT_VERBS = [ "look", "inventory", "pray", "score", "diagnose", "listen"
 ONE_OBJECT_VERBS = [
     "examine", "take", "drop", "open", "close", "read", "drink", "climb",
     "wave", "ring", "wind", "push", "board", "search", "light", "extinguish",
-    "turn_on", "turn_off"
+    "turn_on", "turn_off", "raise", "lower"
 ];
 
 // Verbs taking a direct object and an optional/required indirect object,
@@ -99,7 +99,9 @@ VERB_SYNONYMS = {
     "extinguish" : [ "extinguish", "douse" ],
     "turn_on"    : [ "turn on" ],
     "turn_off"   : [ "turn off" ],
-    "turn"       : [ "turn", "rotate" ]
+    "turn"       : [ "turn", "rotate" ],
+    "raise"      : [ "raise", "lift" ],
+    "lower"      : [ "lower" ]
 };
 
 gameState = {
@@ -122,7 +124,8 @@ gameState = {
         "domeFlag"      : false, // rope tied to the dome railing
         "rainbowFlag"   : false, // rainbow made solid via the sceptre
         "grateRevealed" : false, // grating spotted from below in the maze
-        "rugMoved"      : false  // rug pushed aside, revealing the trap door
+        "rugMoved"      : false, // rug pushed aside, revealing the trap door
+        "cageTop"       : true   // CAGE-TOP: dumbwaiter basket currently at the shaft top
     },
     // Combat (FIGHT-STRENGTH's P?STRENGTH adjustment on the player —
     // negative while wounded, recovering over time in real ZIL via the
@@ -135,7 +138,10 @@ gameState = {
     // taken (object.value, zeroed after scoring so it can't repeat). Added
     // to the trophy case's live TVALUE total to get the real ,SCORE — see
     // handleScoreValue().
-    "baseScore" : 0
+    "baseScore" : 0,
+    // BEACH-DIG: consecutive digs-with-shovel counter in the Sandy Cave
+    // (handleDig). -1 means "not currently digging a hole".
+    "beachDig" : -1
 };
 
 function buildVerbIndex() {
@@ -650,7 +656,73 @@ function handlePush(obj) {
     return "Pushing the #obj.name# doesn't seem to accomplish anything.";
 }
 
+// BASKET-F: the dumbwaiter's chain-pull. RAISE/LOWER swap which end of
+// the chain the basket (lowered_basket/raised_basket — same physical
+// object, different room/state, as in ZIL) sits at, between the Shaft
+// Room (top) and the Drafty Room (bottom). CAGE-TOP tracks which end
+// currently holds it.
+function handleRaise(obj) {
+    if ( obj.id == "rug" ) {
+        return "The rug is too heavy to lift" & ( gameState.flags.rugMoved ?
+            "." :
+            ", but in trying to take it you have noticed an irregularity beneath it." );
+    }
+    if ( [ "lowered_basket", "raised_basket" ].contains( obj.id ) ) {
+        if ( gameState.flags.cageTop ) {
+            return "The basket is already at the top of the shaft.";
+        }
+        objects.raised_basket.location = "shaft_room";
+        objects.lowered_basket.location = "lower_shaft";
+        gameState.flags.cageTop = true;
+        return "The basket is raised to the top of the shaft.";
+    }
+    return "You can't raise that.";
+}
+
+function handleLower(obj) {
+    if ( [ "lowered_basket", "raised_basket" ].contains( obj.id ) ) {
+        if ( !gameState.flags.cageTop ) {
+            return "The basket is already at the bottom of the shaft.";
+        }
+        objects.raised_basket.location = "lower_shaft";
+        objects.lowered_basket.location = "shaft_room";
+        gameState.flags.cageTop = false;
+        return "The basket is lowered to the bottom of the shaft.";
+    }
+    return "You can't lower that.";
+}
+
+// MSWITCH-FUNCTION: turning on the coal mine's machine (clothes-dryer
+// shaped contraption with the START switch). Mirrors "turn on machine"/
+// "turn on switch" to MSWITCH-FUNCTION's TURN-WITH-SCREWDRIVER case,
+// simplified to not require the screwdriver (the engine doesn't support
+// an indirect object on turn_on/turn_off). Coal in the machine becomes a
+// diamond; anything else left inside is destroyed into worthless gunk.
+function runCoalMachine() {
+    if ( objects.machine.open ) {
+        return "The machine doesn't seem to want to do anything.";
+    }
+    var contents = objects.keyArray().filter( (id) => objects[ id ].location == "machine" );
+    if ( contents.contains( "coal" ) ) {
+        objects.coal.location = "";
+        objects.diamond.location = "machine";
+        objects.diamond.hidden = false;
+    } else if ( contents.len() ) {
+        for ( var id in contents ) {
+            objects[ id ].location = "";
+        }
+        objects.gunk.location = "machine";
+        objects.gunk.hidden = false;
+    }
+    return "The machine comes to life (figuratively) with a dazzling display of
+colored lights and bizarre noises. After a few moments, the
+excitement abates.";
+}
+
 function handleTurnOn(obj) {
+    if ( obj.id == "machine" || obj.id == "machine_switch" ) {
+        return runCoalMachine();
+    }
     if ( !obj.light ) {
         return "You can't turn that on.";
     }
@@ -731,8 +803,41 @@ function handleBurn(obj, indirect) {
     return "The #obj.name# catches fire and burns up.";
 }
 
+// SAND-FUNCTION: digging the sand in the Sandy Cave with the shovel. The
+// scarab surfaces on the 4th consecutive dig; a 5th without taking it
+// first collapses the hole on top of the player (BEACH-DIG counter,
+// reset on death or once the scarab is found).
+BDIGS = [
+    "You seem to be digging a hole here.",
+    "The hole is getting deeper, but that's about it.",
+    "You are surrounded by a wall of sand on all sides."
+];
+
 function handleDig(obj, indirect) {
-    return "The ground is too hard to dig here.";
+    if ( obj.id != "sand" ) {
+        return "The ground is too hard to dig here.";
+    }
+    if ( !isStruct( indirect ) || indirect.id != "shovel" ) {
+        return "Digging without a shovel would be slow and tiresome.";
+    }
+    if ( indirect.location != "player" ) {
+        return "You don't have the shovel.";
+    }
+
+    gameState.beachDig += 1;
+
+    if ( gameState.beachDig > 3 ) {
+        gameState.beachDig = -1;
+        return endGame( "The hole collapses, smothering you." );
+    }
+    if ( gameState.beachDig == 3 ) {
+        if ( objects.scarab.hidden ) {
+            objects.scarab.hidden = false;
+            return "You can see a scarab here in the sand.";
+        }
+        return BDIGS[ 1 ];
+    }
+    return BDIGS[ gameState.beachDig + 1 ];
 }
 
 // BOLT-F: turning the dam's bolt with the wrench toggles the reservoir
@@ -1254,6 +1359,12 @@ function handlePut(obj, indirect) {
     if ( obj.location != "player" ) {
         return "You don't have that.";
     }
+    // BASKET-F: the basket only acts as a container from whichever end of
+    // the dumbwaiter shaft it's actually at (raised_basket); the decoy
+    // object at the other end can't hold anything.
+    if ( indirect.id == "lowered_basket" ) {
+        return "The basket is at the other end of the chain.";
+    }
     if ( !indirect.container ) {
         return "You can't put things in the #indirect.name#.";
     }
@@ -1409,6 +1520,9 @@ when it gets to the next room."
 // Moves the player into a room and fires its onEnter hook (ZIL's M-ENTER),
 // e.g. GRATING-ROOM revealing the grate. Most onEnter behavior in the real
 // game is puzzle-specific and isn't implemented yet (see project tasks).
+// A hook may itself relocate the player again (BATS-ROOM's FLY-ME, via
+// gameState.currentRoom) — re-read currentRoom afterward so the final
+// description matches wherever the player actually ended up.
 function enterRoom(roomId) {
     gameState.currentRoom = roomId;
     var room = rooms[ roomId ];
@@ -1421,7 +1535,7 @@ function enterRoom(roomId) {
             return hookResult;
         }
     }
-    return describeRoom( room );
+    return describeRoom( rooms[ gameState.currentRoom ] );
 }
 
 function handleGo(direction) {
@@ -1488,6 +1602,8 @@ function dispatchOneObjectVerb(verb, obj) {
         case "extinguish": return handleExtinguish( obj );
         case "turn_on":    return handleTurnOn( obj );
         case "turn_off":   return handleExtinguish( obj );
+        case "raise":      return handleRaise( obj );
+        case "lower":      return handleLower( obj );
     }
     return "I don't know how to do that yet.";
 }

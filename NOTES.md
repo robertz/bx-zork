@@ -62,22 +62,25 @@ waving it again reverts it. Waving it while standing `on_rainbow` drops the
 rainbow out from under you (`endGame`). `pot_of_gold` (`zorkData.bxs:746`)
 is revealed the first time the sceptre is waved at `end_of_rainbow`.
 
+### Coal mine area
+`handleDig()` now ports `SAND-FUNCTION` verbatim: digging `sand` in
+`sandy_cave` with the `shovel` for 4 consecutive turns reveals `scarab`; a
+5th dig without taking it first collapses the hole and kills the player
+(`gameState.beachDig` tracks the count). `machine_switch` (`zorkData.bxs`)
+ports `MSWITCH-FUNCTION` — turning it on with the lid closed turns coal
+into `diamond` (anything else into `gunk`); wired into `handleTurnOn`. The
+`bat` (`zorkData.bxs`) ports `BATS-ROOM`/`FLY-ME` via `bat_room`'s
+`onEnter` hook: entering without `garlic` sweeps the player to a random
+room from the `BAT-DROPS` pool. New `raise`/`lower` verbs
+(`handleRaise`/`handleLower`) port `BASKET-F`, swapping
+`raised_basket`/`lowered_basket` between `shaft_room`/`lower_shaft` along
+with their contents, tracked via `gameState.flags.cageTop`.
+
 ## Genuinely unimplemented
 
 ### Mirror rooms
 - `mirror_1`/`mirror_2` (`zorkData.bxs:434,439`) — rubbing either should
   teleport you to the other one. Not implemented.
-
-### Coal mine area
-- `machine_switch` (`zorkData.bxs:800`) — turning it on with coal in the
-  coal room's machine should produce a `diamond` (`zorkData.bxs:806`,
-  never placed).
-- `bat` (`zorkData.bxs:769`) should swoop you to a random room unless
-  you're carrying garlic; currently inert.
-- `lowered_basket`/`raised_basket` (`zorkData.bxs:775,782`) — the
-  dumbwaiter chain-pull to swap between them isn't implemented.
-- `scarab` (`zorkData.bxs:744`) stays hidden; should be diggable with the
-  shovel.
 
 ### Egg / canary
 - `egg` (`zorkData.bxs:829`) should break (and damage any canary inside) on
