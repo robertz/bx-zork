@@ -39,8 +39,15 @@ this is the long one, with pointers.
   the reservoir is drained.
 
 ### Mirror rooms
-- `mirror_1`/`mirror_2` (`zorkData.bxs:434,439`) — rubbing either should
-  teleport you to the other one. Not implemented.
+
+Implemented. `rub` is a new one-object verb (`handleRub`, `zorkParser.bxs`)
+wired up for `mirror_1`/`mirror_2` (`zorkData.bxs:431,436`): rubbing either
+mirror swaps `mirror_room_1`/`mirror_room_2`'s non-scenery contents and
+teleports the player to the other room, per `MIRROR-MIRROR` in
+`1actions.zil`. Not modeled: `MIRROR-MUNG` (breaking the mirror via
+MUNG/THROW/ATTACK, which would permanently disable the swap and dock seven
+years of luck) and the "rub with something other than your hands" tingling
+message, since this engine's `rub` grammar has no indirect object yet.
 
 ### Rainbow / sceptre
 - `rainbowFlag` (`zorkParser.bxs:123`) never gets set; waving the `sceptre`
@@ -68,11 +75,25 @@ this is the long one, with pointers.
   `bauble` (`zorkData.bxs:856`) — none of this is wired up.
 
 ### Boat / river
-- `inflated_boat` (`zorkData.bxs:688`) can be created (`handleInflate`,
-  `"inflate boat with pump"`) but actually sailing it on river rooms isn't
-  implemented.
-- `punctured_boat` (`zorkData.bxs:693`) — meant to result from hitting the
-  white cliffs' rocks — is never produced.
+
+Implemented. `gameState.boardedVehicle` (`zorkParser.bxs`) tracks whether
+the player is in the boat. `board`/`launch`/the new `land` direction
+(`handleBoard`/`handleLaunch`/`handleLand`) move the player onto the river
+(`RIVER_LAUNCH`) and back to shore (each room's `land` exit key), and
+`tickRiver()` advances the boat one room downstream per turn while boarded
+(`RIVER_NEXT`), running off the end of `river_5` without landing is a
+waterfall death, matching `I-RIVER`'s `JIGS-UP` in `1actions.zil`.
+`punctured_boat` (`zorkData.bxs:690`) is produced by `handleBoard()` when
+the player carries a weapon aboard, mirroring `RBOAT-FUNCTION`'s `BOARD`
+check (the original tests for `SCEPTRE`/`KNIFE`/`SWORD`/`RUSTY-KNIFE`/
+`AXE`/`STILETTO` by name; this engine generalizes that to "carrying
+anything flagged `weapon`"). Not modeled: hitting the white cliffs' rocks
+specifically (the original's puncture trigger is the `BOARD` check itself,
+not a per-room probability — there is no separate rocks/probability
+mechanic in `1actions.zil` to port), `DBOAT-FUNCTION`'s puncture-repair-with-
+putty path (`FIX-BOAT`), and walking onto river rooms without the boat is
+disallowed simply because the data has no walkable exit into them (matching
+`NONLANDBIT` in practice) rather than via an explicit engine-level check.
 
 ### Other single-item gaps
 - `map` (`zorkData.bxs:893`) — trigger for revealing it isn't implemented.

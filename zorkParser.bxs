@@ -27,7 +27,11 @@ DIRECTION_WORDS = {
     "up" : "up", "u" : "up",
     "down" : "down", "d" : "down",
     "in" : "in", "enter" : "in",
-    "out" : "out", "exit" : "out"
+    "out" : "out", "exit" : "out",
+    // ZIL's LAND is its own verb/direction (the boat's "go ashore" command),
+    // distinct from a compass direction — see the boat label's instructions
+    // and RIVER-LAUNCH/RBOAT-FUNCTION's M-BEG WALK handling for P?LAND.
+    "land" : "land"
 };
 
 // Verbs taking no object at all.
@@ -38,7 +42,7 @@ ZERO_OBJECT_VERBS = [ "look", "inventory", "pray", "score", "diagnose", "listen"
 ONE_OBJECT_VERBS = [
     "examine", "take", "drop", "open", "close", "read", "drink", "climb",
     "wave", "ring", "wind", "push", "board", "search", "light", "extinguish",
-    "turn_on", "turn_off"
+    "turn_on", "turn_off", "rub"
 ];
 
 // Verbs taking a direct object and an optional/required indirect object,
@@ -99,7 +103,8 @@ VERB_SYNONYMS = {
     "extinguish" : [ "extinguish", "douse" ],
     "turn_on"    : [ "turn on" ],
     "turn_off"   : [ "turn off" ],
-    "turn"       : [ "turn", "rotate" ]
+    "turn"       : [ "turn", "rotate" ],
+    "rub"        : [ "rub" ]
 };
 
 gameState = {
@@ -129,7 +134,16 @@ gameState = {
     // I-CURE demon; here it just stays put between fights since there's no
     // turn-based healing demon implemented).
     "playerStrengthAdjustment" : 0,
-    "playerDead" : false
+    "playerDead" : false,
+    // Id of the boat currently carrying the player ("inflated_boat" once
+    // launched), or "" when on foot. Mirrors ZIL's VEHBIT check (<LOC ,WINNER>
+    // being the vehicle rather than a room) used to gate river travel and the
+    // BOARD/WALK/LAUNCH grammar in RBOAT-FUNCTION.
+    "boardedVehicle" : "",
+    // Set by handleLaunch() for the turn it's called on, so tickRiver()
+    // doesn't also drift the boat downstream the same turn it enters the
+    // river (see I-RIVER's queue timing in 1actions.zil).
+    "skipRiverDriftThisTurn" : false
 };
 
 function buildVerbIndex() {
@@ -420,6 +434,38 @@ function handleWind(obj) {
     return "Nothing happens.";
 }
 
+// MIRROR-MIRROR: rubbing either mirror swaps the two mirror rooms' contents
+// (other than the mirrors themselves, which are fixed scenery) and teleports
+// the player to the other room — a "rumble from deep within the earth"
+// rather than a normal exit. The original also short-circuits to a generic
+// tingling message if rubbing it with something other than your bare hands;
+// this engine's "rub X" grammar has no indirect object yet, so that branch
+// doesn't apply.
+function handleRub(obj) {
+    if ( ![ "mirror_1", "mirror_2" ].contains( obj.id ) ) {
+        return "Rubbing the #obj.name# doesn't seem to accomplish anything.";
+    }
+
+    var otherRoomId = obj.id == "mirror_1" ? "mirror_room_2" : "mirror_room_1";
+    var thisRoomId = gameState.currentRoom;
+
+    var movingOut = objects.keyArray().filter(
+        (id) => objects[ id ].location == thisRoomId && !objects[ id ].scenery
+    );
+    var movingIn = objects.keyArray().filter(
+        (id) => objects[ id ].location == otherRoomId && !objects[ id ].scenery
+    );
+    for ( var id in movingOut ) {
+        objects[ id ].location = otherRoomId;
+    }
+    for ( var id in movingIn ) {
+        objects[ id ].location = thisRoomId;
+    }
+
+    enterRoom( otherRoomId );
+    return "There is a rumble from deep within the earth and the room shakes.";
+}
+
 function handleSearch(obj) {
     return handleExamine( obj );
 }
@@ -444,21 +490,134 @@ function handleScore() {
     return "Your score is #handleScoreValue()# (total of 350 points), in #gameState.turns# move(s).";
 }
 
+// Sharp objects puncture the boat the moment they come aboard — mirrors
+// RBOAT-FUNCTION's BOARD check (sceptre/knife/sword/rusty-knife/axe/stiletto
+// in WINNER's inventory), simplified to "any weapon" rather than that fixed
+// object list, since this engine already tracks WEAPONBIT generically.
 function handleBoard(obj) {
     if ( ![ "inflatable_boat", "inflated_boat" ].contains( obj.id ) ) {
         return "You can't board that.";
     }
-    return "Sailing the boat on the river isn't implemented yet.";
+    if ( gameState.boardedVehicle.len() ) {
+        return "You're already in the boat.";
+    }
+    if ( obj.id == "inflatable_boat" ) {
+        return "You can't board that — it's not inflated.";
+    }
+
+    var sharpCarried = carriedIds().filter( (id) => objects[ id ].weapon );
+    if ( sharpCarried.len() ) {
+        objects.inflated_boat.location = "";
+        objects.punctured_boat.location = gameState.currentRoom;
+        return "Oops! Something sharp seems to have slipped and punctured the boat." & NEWLINE &
+            "The boat deflates to the sounds of hissing, sputtering, and cursing.";
+    }
+
+    gameState.boardedVehicle = obj.id;
+    return "You are now in the boat.";
 }
 
+// RIVER-LAUNCH: which river room (if any) launching from a given room drops
+// you into. Rooms not listed here simply aren't valid places to launch from.
+RIVER_LAUNCH = {
+    "dam_base"           : "river_1",
+    "white_cliffs_north" : "river_3",
+    "white_cliffs_south" : "river_4",
+    "shore"               : "river_5",
+    "sandy_beach"         : "river_4"
+};
+
+// RIVER-NEXT: where the current carries the boat each turn while drifting.
+RIVER_NEXT = {
+    "river_1" : "river_2",
+    "river_2" : "river_3",
+    "river_3" : "river_4",
+    "river_4" : "river_5"
+};
+
+// NONLANDBIT rooms: the river proper, where you can't be without the boat
+// (VEHBIT check in WALK/M-BEG) and where the current keeps carrying you on
+// (I-RIVER) until you land or run out of river.
+RIVER_ROOMS = [ "river_1", "river_2", "river_3", "river_4", "river_5" ];
+
 function handleLaunch() {
-    var boatHere = [ "inflatable_boat", "inflated_boat" ].filter(
-        (id) => objects[ id ].location == gameState.currentRoom || objects[ id ].location == "player"
-    );
-    if ( boatHere.isEmpty() ) {
-        return "You don't have a boat to launch here.";
+    if ( RIVER_ROOMS.contains( gameState.currentRoom ) ) {
+        return "You are on the river, or have you forgotten?";
     }
-    return "Sailing the boat on the river isn't implemented yet.";
+
+    if ( !gameState.boardedVehicle.len() ) {
+        return "You're not in the boat!";
+    }
+
+    if ( !RIVER_LAUNCH.keyExists( gameState.currentRoom ) ) {
+        return "You can't launch it here.";
+    }
+
+    // ZIL queues I-RIVER to start running on a later turn (ENABLE <QUEUE
+    // I-RIVER ...> at the end of LAUNCH), so the room you launch into this
+    // turn shouldn't also drift downstream this same turn.
+    gameState.skipRiverDriftThisTurn = true;
+    var boatId = gameState.boardedVehicle;
+    var description = enterRoom( RIVER_LAUNCH[ gameState.currentRoom ] );
+    objects[ boatId ].location = gameState.currentRoom;
+    return "You launch the boat onto the river." & NEWLINE & description;
+}
+
+// LAND: ZIL's "go ashore" verb for the boat, and also a per-room exit key
+// used when only one landing direction makes sense (e.g. RIVER-1's west
+// bank). Disembarking moves the boat (not just the player) into the new
+// room, mirroring RBOAT-FUNCTION/THIS-IS-IT.
+function handleLand() {
+    if ( !gameState.boardedVehicle.len() ) {
+        return "You're not in a boat!";
+    }
+
+    var room = rooms[ gameState.currentRoom ];
+    if ( !room.exits.keyExists( "land" ) ) {
+        return "You can't land here.";
+    }
+
+    var exit = room.exits.land;
+    if ( !isSimpleValue( exit ) ) {
+        return exit.blocked;
+    }
+
+    var boatId = gameState.boardedVehicle;
+    gameState.boardedVehicle = "";
+    var description = enterRoom( exit );
+    objects[ boatId ].location = gameState.currentRoom;
+    return description;
+}
+
+// I-RIVER: each turn spent boarded on the river without landing, the
+// current carries you one room further downstream (no speed/queue timing
+// modeled, just one room per turn). Drifting past river_5 with nowhere
+// further to go is the waterfall death from RBOAT-FUNCTION's I-RIVER ELSE
+// clause. Returns an extra line to append after the turn's own output, or
+// "" if the player isn't drifting this turn.
+function tickRiver() {
+    if ( gameState.skipRiverDriftThisTurn ) {
+        gameState.skipRiverDriftThisTurn = false;
+        return "";
+    }
+
+    if ( !gameState.boardedVehicle.len() || !RIVER_ROOMS.contains( gameState.currentRoom ) ) {
+        return "";
+    }
+
+    if ( !RIVER_NEXT.keyExists( gameState.currentRoom ) ) {
+        return endGame(
+"Unfortunately, the magic boat doesn't provide protection from
+the rocks and boulders one meets at the bottom of waterfalls.
+Including this one."
+        );
+    }
+
+    var nextRoom = RIVER_NEXT[ gameState.currentRoom ];
+    var boatId = gameState.boardedVehicle;
+    var description = enterRoom( nextRoom );
+    objects[ boatId ].location = gameState.currentRoom;
+    return "The flow of the river carries you downstream." & NEWLINE & NEWLINE & description;
 }
 
 // Generic scenery interaction; the rug is the one well-defined source
@@ -1196,6 +1355,25 @@ function enterRoom(roomId) {
 }
 
 function handleGo(direction) {
+    if ( direction == "land" ) {
+        return handleLand();
+    }
+
+    // VEHBIT check (RBOAT-FUNCTION's M-BEG WALK handling): once aboard the
+    // boat on the river itself, only LAND/EAST/WEST fall through to normal
+    // exit handling (the room's own exits decide whether east/west are a
+    // valid landing or a blocked message); every other direction — notably
+    // UP and DOWN, since the current carries you downstream automatically —
+    // gets the same redirect. The reverse case (walking into a river room
+    // without a boat) needs no extra check: none of river_1-5's exits are
+    // reachable except by LAUNCH, matching NONLANDBIT in the data rather
+    // than at the engine layer.
+    var boardedOnRiver = gameState.boardedVehicle.len() && RIVER_ROOMS.contains( gameState.currentRoom );
+
+    if ( boardedOnRiver && direction != "east" && direction != "west" ) {
+        return "Read the label for the boat's instructions.";
+    }
+
     var room = rooms[ gameState.currentRoom ];
     if ( !room.exits.keyExists( direction ) ) {
         return "You can't go that way.";
@@ -1203,8 +1381,22 @@ function handleGo(direction) {
 
     var exit = room.exits[ direction ];
 
+    // Walking east/west off the river (instead of LAND) still beaches the
+    // boat, exactly like landing — RBOAT-FUNCTION lets WALK EAST/WEST fall
+    // through to the room's own exit, but the boat comes ashore with you
+    // either way.
+    function disembark(description) {
+        if ( !boardedOnRiver ) {
+            return description;
+        }
+        var boatId = gameState.boardedVehicle;
+        gameState.boardedVehicle = "";
+        objects[ boatId ].location = gameState.currentRoom;
+        return description;
+    }
+
     if ( isSimpleValue( exit ) ) {
-        return enterRoom( exit );
+        return disembark( enterRoom( exit ) );
     }
 
     if ( exit.keyExists( "blocked" ) ) {
@@ -1213,7 +1405,7 @@ function handleGo(direction) {
 
     if ( exit.keyExists( "per" ) ) {
         var outcome = PER_EXITS[ exit.per ]();
-        return isSimpleValue( outcome ) ? enterRoom( outcome ) : outcome.blocked;
+        return isSimpleValue( outcome ) ? disembark( enterRoom( outcome ) ) : outcome.blocked;
     }
 
     if ( exit.keyExists( "to" ) ) {
@@ -1229,7 +1421,7 @@ function handleGo(direction) {
         if ( exit.keyExists( "requiresEmptyHanded" ) && !carriedIds().isEmpty() ) {
             return exit.keyExists( "blockedMessage" ) ? exit.blockedMessage : "You can't go that way.";
         }
-        return enterRoom( exit.to );
+        return disembark( enterRoom( exit.to ) );
     }
 
     return "You can't go that way.";
@@ -1259,6 +1451,7 @@ function dispatchOneObjectVerb(verb, obj) {
         case "extinguish": return handleExtinguish( obj );
         case "turn_on":    return handleTurnOn( obj );
         case "turn_off":   return handleExtinguish( obj );
+        case "rub":        return handleRub( obj );
     }
     return "I don't know how to do that yet.";
 }
@@ -1386,9 +1579,16 @@ function processCommand(input) {
 
     var result = dispatchCommand( input );
 
-    var thiefNote = tickThief();
-    if ( thiefNote.len() ) {
-        result &= NEWLINE & thiefNote;
+    var riverNote = tickRiver();
+    if ( riverNote.len() ) {
+        result &= NEWLINE & riverNote;
+    }
+
+    if ( !gameState.playerDead ) {
+        var thiefNote = tickThief();
+        if ( thiefNote.len() ) {
+            result &= NEWLINE & thiefNote;
+        }
     }
 
     return result;
