@@ -35,7 +35,7 @@ DIRECTION_WORDS = {
 };
 
 // Verbs taking no object at all.
-ZERO_OBJECT_VERBS = [ "look", "inventory", "pray", "score", "diagnose", "listen", "launch", "odysseus" ];
+ZERO_OBJECT_VERBS = [ "look", "inventory", "pray", "score", "diagnose", "listen", "launch", "odysseus", "save" ];
 
 // Verbs taking exactly one object (an empty noun phrase is an error, except
 // "smell" which is handled separately since it's valid with or without one).
@@ -108,7 +108,8 @@ VERB_SYNONYMS = {
     "raise"      : [ "raise", "lift" ],
     "lower"      : [ "lower" ],
     "rub"        : [ "rub" ],
-    "throw"      : [ "throw", "hurl", "chuck", "toss" ]
+    "throw"      : [ "throw", "hurl", "chuck", "toss" ],
+    "save"       : [ "save" ]
 };
 
 gameState = {
@@ -787,6 +788,53 @@ function handleScore() {
     var points = handleScoreValue();
     return "Your score is #points# (total of 350 points), in #gameState.turns# move(s)." &
         NEWLINE & "This gives you the rank of #scoreRank( points )#.";
+}
+
+SAVE_FILE = "zork.save";
+
+// Serialize current game state and all mutable object fields to SAVE_FILE.
+function handleSave() {
+    var objectState = {};
+    for ( var id in objects ) {
+        var obj = objects[ id ];
+        objectState[ id ] = {
+            "location"  : obj.location,
+            "on"        : obj.on,
+            "open"      : obj.open,
+            "hidden"    : obj.hidden,
+            "fuel"      : obj.fuel,
+            "burnedOut" : obj.burnedOut,
+            "locked"    : obj.locked
+        };
+    }
+    fileWrite( SAVE_FILE, jsonSerialize( { "gameState" : gameState, "objectState" : objectState } ) );
+    return "Saved.";
+}
+
+// Restore game state from SAVE_FILE if it exists. Called once at startup
+// before the first prompt.
+function loadSave() {
+    if ( !fileExists( SAVE_FILE ) ) {
+        return;
+    }
+    try {
+        var saved = jsonDeserialize( fileRead( SAVE_FILE ) );
+        for ( var key in saved.gameState ) {
+            gameState[ key ] = saved.gameState[ key ];
+        }
+        for ( var id in saved.objectState ) {
+            var s = saved.objectState[ id ];
+            objects[ id ].location  = s.location;
+            objects[ id ].on        = s.on;
+            objects[ id ].open      = s.open;
+            objects[ id ].hidden    = s.hidden;
+            objects[ id ].fuel      = s.fuel;
+            objects[ id ].burnedOut = s.burnedOut;
+            objects[ id ].locked    = s.locked;
+        }
+    } catch ( e ) {
+        println( "(Save file could not be read; starting a new game.)" );
+    }
 }
 
 // Sharp objects puncture the boat the moment they come aboard — mirrors
@@ -2341,6 +2389,7 @@ function dispatchCommand(input) {
             case "listen":    return handleListenVerb();
             case "launch":    return handleLaunch();
             case "odysseus":  return handleOdysseus();
+            case "save":      return handleSave();
         }
     }
 
@@ -2520,5 +2569,6 @@ cliArgs = CLIGetArgs().positionals;
 if ( cliArgs.len() && cliArgs[ 1 ] == "demo" ) {
     runDemo();
 } else {
+    loadSave();
     runInteractive();
 }
