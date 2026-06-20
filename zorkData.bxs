@@ -556,7 +556,7 @@ excised them.",
     "dam" : makeObject(
         "dam", "dam", [ "dam", "gate", "gates" ], "", false,
         { "scenery" : true, "location" : "dam_room",
-          "note" : """turn bolt with wrench"" toggles lowTide directly (handleTurn); the real GATES-OPEN transitional state and gate-flag bubble aren't modeled (Task 6)." }
+          "note" : """turn bolt with wrench"" needs gateFlag set (yellow button) first, then toggles gatesOpen; lowTide only catches up 8 turns later via tickDam() (handleTurn)." }
     ),
     "bolt" : makeObject(
         "bolt", "bolt", [ "bolt", "nut" ], "", false,
@@ -616,7 +616,7 @@ excised them.",
     "leak" : makeObject(
         "leak", "leak", [ "leak", "drip", "pipe" ], "", false,
         { "scenery" : true, "location" : "maintenance_room", "hidden" : true,
-          "note" : "Revealed by pushing the blue button (handlePush)." }
+          "note" : "Revealed by pushing the blue button (handlePush), which also starts the water-level flood timer (tickMaintRoom). ""put putty on/in leak"" fixes it (handlePut/fixMaintLeak)." }
     ),
     "guide" : makeObject(
         "guide", "tour guidebook", [ "guide", "book", "books", "guidebooks" ],
@@ -702,7 +702,7 @@ attached.", true,
     "punctured_boat" : makeObject(
         "punctured_boat", "punctured boat", [ "boat", "pile", "plastic" ], "", true,
         { "adjectives" : [ "plastic", "punctured", "large" ], "burnable" : true, "size" : 20, "location" : "",
-          "note" : "Produced by handleBoard() when a weapon is carried aboard (RBOAT-FUNCTION's BOARD check, 1actions.zil)." }
+          "note" : "Produced by handleBoard() when a weapon is carried aboard (RBOAT-FUNCTION's BOARD check, 1actions.zil). ""put putty on/in punctured_boat"" repairs it (handlePut/fixBoat): moves inflatable_boat to its spot and removes this one, mirroring FIX-BOAT verbatim." }
     ),
     "boat_label" : makeObject(
         "boat_label", "tan label", [ "label", "fineprint", "print" ],
@@ -1834,20 +1834,29 @@ which leads into darkness. You probably could not get back up it.",
 
     "dam_room" : {
         "id" : "dam_room", "name" : "Dam",
-        // Simplified from DAM-ROOM-FCN: GATES-OPEN transitional text and the
-        // glowing-bubble (GATE-FLAG) detail aren't modeled — Task 6.
+        // DAM-ROOM-FCN's M-LOOK: verbatim 4-state matrix over
+        // lowTide x gatesOpen, plus the glowing-bubble GATE-FLAG detail.
         "dynamicDescription" : () => {
             var text = "You are standing on the top of the Flood Control Dam ##3, which was
 quite a tourist attraction in times far distant. There are paths to
 the north, south, and west, and a scramble down.";
-            text &= NEWLINE & ( gameState.flags.lowTide ?
-"The sluice gates are closed. The water level in the reservoir is
-quite low, but the level is rising quickly." :
-"The sluice gates on the dam are closed. Behind the dam, there can be
+            if ( gameState.flags.lowTide && gameState.flags.gatesOpen ) {
+                text &= NEWLINE & "The water level behind the dam is low: The sluice gates have been
+opened. Water rushes through the dam and downstream.";
+            } else if ( gameState.flags.gatesOpen ) {
+                text &= NEWLINE & "The sluice gates are open, and water rushes through the dam. The
+water level behind the dam is still high.";
+            } else if ( gameState.flags.lowTide ) {
+                text &= NEWLINE & "The sluice gates are closed. The water level in the reservoir is
+quite low, but the level is rising quickly.";
+            } else {
+                text &= NEWLINE & "The sluice gates on the dam are closed. Behind the dam, there can be
 seen a wide reservoir. Water is pouring over the top of the now
-abandoned dam." );
+abandoned dam.";
+            }
             text &= NEWLINE & "There is a control panel here, on which a large metal bolt is mounted.
-Directly above the bolt is a small green plastic bubble.";
+Directly above the bolt is a small green plastic bubble" &
+                ( gameState.flags.gateFlag ? " which is glowing serenely" : "" ) & ".";
             return text;
         },
         "exits" : { "south" : "deep_canyon", "down" : "dam_base", "east" : "dam_base", "north" : "dam_lobby", "west" : "reservoir_south" }
@@ -1858,7 +1867,11 @@ Directly above the bolt is a small green plastic bubble.";
 "This room appears to have been the waiting room for groups touring
 the dam. There are open doorways here to the north and east marked
 ""Private"", and there is a path leading south over the top of the dam.",
-        "exits" : { "south" : "dam_room", "north" : "maintenance_room", "east" : "maintenance_room" }
+        "exits" : {
+            "south" : "dam_room",
+            "north" : { "per" : "maintenance_room_entrance" },
+            "east"  : { "per" : "maintenance_room_entrance" }
+        }
     },
     "maintenance_room" : {
         "id" : "maintenance_room", "name" : "Maintenance Room",

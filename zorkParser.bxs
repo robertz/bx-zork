@@ -134,8 +134,25 @@ gameState = {
         "rugMoved"      : false, // rug pushed aside, revealing the trap door
         "cageTop"       : true,  // CAGE-TOP: dumbwaiter basket currently at the shaft top
         "songSung"      : false, // SING-SONG: canary already wound in a forest room, bauble dropped
-        "mirrorBroken"  : false  // MIRROR-MUNG: mirror smashed, disabling MIRROR-MIRROR teleport for both rooms
+        "mirrorBroken"  : false, // MIRROR-MUNG: mirror smashed, disabling MIRROR-MIRROR teleport for both rooms
+        "gateFlag"      : false, // GATE-FLAG: yellow button pushed, bolt now turns (bubble glows)
+        "gatesOpen"     : false  // GATES-OPEN: sluice gates currently open (lowTide follows 8 turns later)
     },
+    // I-RFILL/I-REMPTY: turns left until the reservoir actually finishes
+    // draining/refilling after the bolt is turned (0 = no transition in
+    // progress). Decremented by tickDam(); when it hits 0, lowTide flips to
+    // match gatesOpen.
+    "gatesTransitionTurns" : 0,
+    // WATER-LEVEL: maintenance room flood level. 0 (the ZIL default) means
+    // "leak not started yet" — the only state in which the blue button
+    // still works; pushing it sets this to 1 and starts tickMaintRoom()'s
+    // countdown. FIX-MAINT-LEAK sets it to -1 ("patched"), which is
+    // deliberately *not* 0 again — exactly like ZIL, the blue button is a
+    // one-shot: pushing it again after a fix still reports "jammed".
+    "waterLevel" : 0,
+    // MUNG-ROOM's effect on the Maintenance Room: once true, the room is
+    // permanently flooded and can no longer be entered.
+    "maintenanceFlooded" : false,
     // Combat (FIGHT-STRENGTH's P?STRENGTH adjustment on the player —
     // negative while wounded, recovering over time in real ZIL via the
     // I-CURE demon; here it just stays put between fights since there's no
@@ -876,13 +893,17 @@ function handlePush(obj) {
         return "With great effort, you move the rug to one side of the room, revealing a closed trap door.";
     }
     // BUTTON-F: the blue button bursts a pipe in the maintenance room,
-    // revealing the leak. The real water-level flooding timer
-    // (I-MAINT-ROOM) isn't modeled — that's a fuel/timer-system task.
+    // revealing the leak and starting the water-level flooding timer
+    // (I-MAINT-ROOM, tickMaintRoom()). <0? WATER-LEVEL> is the real gate —
+    // a one-shot: it's only ever 0 before the first push, never again
+    // afterward (1+ while leaking, -1 once patched), so pushing it again at
+    // any point afterward — even post-fix — reports jammed, same as ZIL.
     if ( obj.id == "blue_button" ) {
-        if ( !objects.leak.hidden ) {
+        if ( gameState.waterLevel != 0 ) {
             return "The blue button appears to be jammed.";
         }
         objects.leak.hidden = false;
+        gameState.waterLevel = 1;
         return "There is a rumbling sound and a stream of water appears to burst" &
             NEWLINE & "from the east wall of the room (apparently, a leak has occurred in a" &
             NEWLINE & "pipe).";
@@ -890,7 +911,15 @@ function handlePush(obj) {
     if ( obj.id == "red_button" ) {
         return "The lights within the room come on.";
     }
-    if ( obj.id == "brown_button" || obj.id == "yellow_button" ) {
+    // BUTTON-F: yellow/brown set/clear GATE-FLAG, which is what lets the
+    // bolt turn at all (handleTurn) — the dam control panel's bubble glows
+    // while it's set.
+    if ( obj.id == "yellow_button" ) {
+        gameState.flags.gateFlag = true;
+        return "Click.";
+    }
+    if ( obj.id == "brown_button" ) {
+        gameState.flags.gateFlag = false;
         return "Click.";
     }
     return "Pushing the #obj.name# doesn't seem to accomplish anything.";
@@ -1124,21 +1153,32 @@ function handleDig(obj, indirect) {
     return BDIGS[ gameState.beachDig + 1 ];
 }
 
-// BOLT-F: turning the dam's bolt with the wrench toggles the reservoir
-// level. Simplified to an instant flip — the real GATES-OPEN transitional
-// state and the glowing-bubble GATE-FLAG aren't modeled (see Task 6).
+// BOLT-F: turning the dam's bolt with the wrench needs GATE-FLAG set first
+// (yellow button, handlePush) — the bubble glowing is what tells you that.
+// Once gated, it toggles GATES-OPEN (not lowTide directly); the reservoir
+// itself only actually drains/refills 8 turns later, via tickDam().
 function handleTurn(obj, indirect) {
     if ( obj.id == "bolt" ) {
-        if ( !isStruct( indirect ) || indirect.id != "wrench" ) {
+        if ( !isStruct( indirect ) ) {
             return "You'll need the wrench to turn the bolt.";
+        }
+        if ( indirect.id != "wrench" ) {
+            return "The bolt won't turn using the #indirect.name#.";
         }
         if ( indirect.location != "player" ) {
             return "You don't have the wrench.";
         }
-        gameState.flags.lowTide = !gameState.flags.lowTide;
-        return gameState.flags.lowTide ?
-            "You hear a rumbling sound in the distance as the sluice gates open and the water level begins to drop." :
-            "You hear a rumbling sound in the distance as the sluice gates close.";
+        if ( !gameState.flags.gateFlag ) {
+            return "The bolt won't turn with your best effort.";
+        }
+        if ( gameState.flags.gatesOpen ) {
+            gameState.flags.gatesOpen = false;
+            gameState.gatesTransitionTurns = 8;
+            return "The sluice gates close and water starts to collect behind the dam.";
+        }
+        gameState.flags.gatesOpen = true;
+        gameState.gatesTransitionTurns = 8;
+        return "The sluice gates open and water pours through the dam.";
     }
     return "Turning the #obj.name# doesn't seem to accomplish anything.";
 }
@@ -1460,6 +1500,62 @@ function tickMatch() {
     return lightSourceVisible( objects.match ) ? "The match has gone out." : "";
 }
 
+// I-RFILL/I-REMPTY: the reservoir doesn't drain/refill the instant the bolt
+// is turned — GATES-OPEN just starts an 8-turn countdown, after which
+// lowTide flips to match it. Mirrors the bare-bones plumbing of those two
+// routines (the TOUCHBIT-clearing redescription tricks and the loud-room/
+// deep-canyon ambient lines and the boat-specific cases are river/vehicle
+// flavor outside this task's scope, so only the lowTide flip itself and the
+// reservoir's own trunk-reveal onEnter hook are ported).
+function tickDam() {
+    if ( gameState.gatesTransitionTurns <= 0 ) {
+        return "";
+    }
+    gameState.gatesTransitionTurns -= 1;
+    if ( gameState.gatesTransitionTurns > 0 ) {
+        return "";
+    }
+    gameState.flags.lowTide = gameState.flags.gatesOpen;
+    return "";
+}
+
+// DROWNINGS: indexed by water-level/2, exactly nine stages from ankle-deep
+// to lungs-full before I-MAINT-ROOM floods the room outright at level 14.
+DROWNINGS = [
+    "up to your ankles.",
+    "up to your shin.",
+    "up to your knees.",
+    "up to your hips.",
+    "up to your waist.",
+    "up to your chest.",
+    "up to your neck.",
+    "over your head.",
+    "high in your lungs."
+];
+
+// I-MAINT-ROOM: once the leak starts (blue button), the water level rises
+// by 1 every turn. While standing in the Maintenance Room it prints the
+// current DROWNINGS stage; at level 14 the room floods for good (MUNG-ROOM)
+// and, if the player is still in there, drowns them outright.
+function tickMaintRoom() {
+    if ( gameState.waterLevel <= 0 ) {
+        return "";
+    }
+    var hereNow = gameState.currentRoom == "maintenance_room";
+    var note = "";
+    if ( hereNow ) {
+        note = "The water level here is now " & DROWNINGS[ int( gameState.waterLevel / 2 ) + 1 ] ;
+    }
+    gameState.waterLevel += 1;
+    if ( gameState.waterLevel >= 14 ) {
+        gameState.maintenanceFlooded = true;
+        if ( hereNow ) {
+            return endGame( "I'm afraid you have done drowned yourself." );
+        }
+    }
+    return note;
+}
+
 // Applies a blow outcome to the player; returns "" normally, or a death
 // message if it was fatal (WINNER-RESULT).
 function applyBlowToPlayer(outcome) {
@@ -1775,9 +1871,33 @@ function handleGive(obj, indirect) {
     return "The #indirect.name# doesn't want that.";
 }
 
+// FIX-MAINT-LEAK: putty stops the leak outright, resets WATER-LEVEL to its
+// "stopped" sentinel, and cancels the flood timer.
+function fixMaintLeak() {
+    gameState.waterLevel = -1;
+    return "By some miracle of Zorkian technology, you have managed to stop the
+leak in the dam.";
+}
+
+// FIX-BOAT: putty doesn't reinflate the punctured boat — it moves the
+// (still deflated) inflatable_boat to wherever the punctured one was lying,
+// and the punctured one is gone for good. Re-inflating it afterward is the
+// existing pump mechanic (handleInflate).
+function fixBoat() {
+    objects.inflatable_boat.location = objects.punctured_boat.location;
+    objects.punctured_boat.location = "";
+    return "Well done. The boat is repaired.";
+}
+
 function handlePut(obj, indirect) {
     if ( obj.location != "player" ) {
         return "You don't have that.";
+    }
+    if ( obj.id == "putty" && indirect.id == "leak" ) {
+        return fixMaintLeak();
+    }
+    if ( obj.id == "putty" && indirect.id == "punctured_boat" ) {
+        return fixBoat();
     }
     // BASKET-F: the basket only acts as a container from whichever end of
     // the dumbwaiter shaft it's actually at (raised_basket); the decoy
@@ -1934,6 +2054,14 @@ when it gets to the next room."
             return "kitchen";
         }
         return { "blocked" : "You can't get up there with what you're carrying." };
+    },
+    // MUNG-ROOM's effect once I-MAINT-ROOM floods the Maintenance Room for
+    // good: it's permanently unenterable after that.
+    "maintenance_room_entrance" : () => {
+        if ( gameState.maintenanceFlooded ) {
+            return { "blocked" : "The room is full of water and cannot be entered." };
+        }
+        return "maintenance_room";
     }
 };
 
@@ -2216,9 +2344,23 @@ function processCommand(input) {
         result &= NEWLINE & matchNote;
     }
 
-    var endgameNote = checkEndgameTrigger();
-    if ( endgameNote.len() ) {
-        result &= endgameNote;
+    var damNote = tickDam();
+    if ( damNote.len() ) {
+        result &= NEWLINE & damNote;
+    }
+
+    if ( !gameState.playerDead ) {
+        var maintRoomNote = tickMaintRoom();
+        if ( maintRoomNote.len() ) {
+            result &= NEWLINE & maintRoomNote;
+        }
+    }
+
+    if ( !gameState.playerDead ) {
+        var endgameNote = checkEndgameTrigger();
+        if ( endgameNote.len() ) {
+            result &= endgameNote;
+        }
     }
 
     return result;
