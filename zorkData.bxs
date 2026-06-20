@@ -321,7 +321,7 @@ No computer should be without one!""",
 out of the room.",
         false,
         { "adjectives" : [ "nasty" ], "actor" : true, "strength" : 2, "location" : "troll_room",
-          "note" : "TODO: combat not implemented (Task 5); trollFlag never flips, so the troll never yields." }
+          "note" : "Fightable via handleAttack; defeating him sets trollFlag, opening the maze passages." }
     ),
     "axe" : makeObject(
         "axe", "bloody axe", [ "axe", "ax" ], "", true,
@@ -393,7 +393,7 @@ will provide many months of trouble-free operation.",
         "cyclops", "cyclops", [ "cyclops", "monster", "eye" ], "", false,
         { "adjectives" : [ "hungry", "giant" ], "scenery" : true, "actor" : true, "strength" : 10000,
           "location" : "cyclops_room",
-          "note" : "TODO: feeding/scaring it off (Task 5/6) isn't implemented; cyclopsFlag/magicFlag never flip." }
+          "note" : "Defeating him in combat or giving him water (handleGiveCyclops) sets both cyclopsFlag and magicFlag." }
     ),
     "large_bag" : makeObject(
         "large_bag", "large bag", [ "bag" ], "", false,
@@ -448,7 +448,7 @@ against one wall. He is armed with a deadly stiletto.",
         false,
         { "adjectives" : [ "shady", "suspicious", "seedy" ], "actor" : true, "strength" : 5,
           "container" : true, "open" : true, "location" : "round_room", "hidden" : true,
-          "note" : "TODO: random movement, theft, and combat are not implemented (Task 5)." }
+          "note" : "Random movement, theft, and combat are all implemented via tickThief()/handleAttack." }
     ),
     "bar" : makeObject(
         "bar", "platinum bar", [ "bar", "platinum", "treasure" ],
