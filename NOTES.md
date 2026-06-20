@@ -166,14 +166,25 @@ doesn't currently affect what you can see or do; it's flavor-only. That's
 a separate, larger gap than "light sources should run out," and is
 deliberately out of scope here.
 
+### Throw
+New `throw`/`hurl`/`chuck`/`toss` verb (`handleThrow`, `zorkParser.bxs`,
+wired into `TWO_OBJECT_VERBS` with an optional `at` preposition) ports
+`V-THROW` (`gverbs.zil:1445`) generically: `throw X` alone drops it in the
+current room ("Thrown."); `throw X at <villain>` has the villain duck and
+the object falls to the ground (no per-villain catch/anger mechanics —
+deliberately generic); `throw X at me`/`myself` is the verbatim fatal
+"terrific throw" death via `endGame()`. Two object-specific overrides take
+priority over that generic behavior, both verbatim-ported: `LANTERN`'s
+`THROW` case (`1actions.zil`) smashes `brass_lantern` (removing it
+entirely, turning off its light) and places `broken_lamp` (`zorkData.bxs:943`)
+in the room instead — the gap this was tracked under is now closed; and
+`EGG-OBJECT`'s `OPEN MUNG THROW` case (`1actions.zil`, via the existing
+`BAD-EGG`-derived `breakEgg()` helper) breaks the egg even when thrown at a
+villain, taking priority over the generic duck response for that one item.
+
 ## Genuinely unimplemented
 
 ### Other single-item gaps
-- `broken_lamp` (`zorkData.bxs:943`) — per ZIL's `LANTERN` routine, this is
-  produced only by *throwing* the lamp, not by fuel exhaustion (a burned-
-  out lamp just stays in place, permanently dead — see `brass_lantern`'s
-  `burnedOut` flag, now implemented). Stays unplaced until a `throw` verb
-  exists.
 - `teeth`, `wall`, `granite_wall` (`zorkData.bxs:72,77,82`) — ZIL
   `GLOBAL-OBJECTS` scenery kept for vocabulary/flavor only; intentionally
   not wired to any room.

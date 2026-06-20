@@ -943,7 +943,7 @@ southwest, is marked ""To Stone Barrow"".",
     "broken_lamp" : makeObject(
         "broken_lamp", "broken lantern", [ "lamp", "lantern" ], "", true,
         { "adjectives" : [ "broken" ], "location" : "",
-          "note" : "TODO: per LANTERN's THROW case, only smashing the lamp produces this (burning out via fuel exhaustion just leaves brass_lantern in place, permanently unlightable — see brass_lantern.burnedOut). Not placed until a throw verb exists." }
+          "note" : "Per LANTERN's THROW case (1actions.zil), only smashing the lamp (handleThrow, zorkParser.bxs) produces this — burning out via fuel exhaustion just leaves brass_lantern in place, permanently unlightable (see brass_lantern.burnedOut). Not placed at load; throw brass_lantern places it in the current room." }
     ),
 
     // --- Endgame (Stone Barrow) -----------------------------------------------------

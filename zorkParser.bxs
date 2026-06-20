@@ -60,7 +60,8 @@ TWO_OBJECT_VERBS = {
     "burn"    : { "prepositions" : [ "with" ],                    "requireSecond" : false },
     "dig"     : { "prepositions" : [ "with" ],                    "requireSecond" : false },
     "turn"    : { "prepositions" : [ "with" ],                    "requireSecond" : false },
-    "attack"  : { "prepositions" : [ "with" ],                    "requireSecond" : false }
+    "attack"  : { "prepositions" : [ "with" ],                    "requireSecond" : false },
+    "throw"   : { "prepositions" : [ "at" ],                      "requireSecond" : false }
 };
 
 VERB_SYNONYMS = {
@@ -106,7 +107,8 @@ VERB_SYNONYMS = {
     "turn"       : [ "turn", "rotate" ],
     "raise"      : [ "raise", "lift" ],
     "lower"      : [ "lower" ],
-    "rub"        : [ "rub" ]
+    "rub"        : [ "rub" ],
+    "throw"      : [ "throw", "hurl", "chuck", "toss" ]
 };
 
 gameState = {
@@ -1581,6 +1583,48 @@ function handleAttack(villain, indirect) {
     return lines.toList( NEWLINE );
 }
 
+// V-THROW (gverbs.zil:1445), plus LANTERN's THROW case (1actions.zil,
+// ROUTINE LANTERN) and the egg's "OPEN MUNG THROW" case (1actions.zil,
+// ROUTINE EGG-OBJECT) for the two object-specific overrides this engine
+// implements. `indirect` is "" (no target), the sentinel string "player"
+// (PRSI == ME), or a resolved villain/other object struct.
+function handleThrow(obj, indirect) {
+    if ( obj.location != "player" ) {
+        return "You don't have that.";
+    }
+
+    if ( obj.id == "egg" ) {
+        obj.location = gameState.currentRoom;
+        breakEgg();
+        return "The egg falls to the ground and springs open, seriously damaged.";
+    }
+
+    if ( obj.id == "brass_lantern" ) {
+        // LANTERN's THROW case: DISABLE the fuel interrupt, REMOVE-CAREFULLY
+        // the lamp, MOVE BROKEN-LAMP HERE.
+        objects.brass_lantern.on = false;
+        objects.brass_lantern.location = "";
+        objects.broken_lamp.location = gameState.currentRoom;
+        objects.broken_lamp.hidden = false;
+        return "The lamp has smashed into the floor, and the light has gone out.";
+    }
+
+    if ( isStruct( indirect ) && indirect.id == "player" ) {
+        return endGame( "A terrific throw! The #obj.name# hits you squarely in the head. Normally,
+this wouldn't do much damage, but by incredible mischance, you fall over
+backwards trying to duck, and break your neck, justice being swift and
+merciful in the Great Underground Empire." );
+    }
+
+    if ( isStruct( indirect ) && indirect.actor ) {
+        obj.location = gameState.currentRoom;
+        return "The #indirect.name# ducks as the #obj.name# flies by and crashes to the ground.";
+    }
+
+    obj.location = gameState.currentRoom;
+    return "Thrown.";
+}
+
 // Said in the Cyclops Room: he flees in terror at the name of his father's
 // nemesis, smashing the east wall through to the Treasure Room area (sets
 // magicFlag, which is also what unblocks Living Room's west door).
@@ -2021,7 +2065,12 @@ function dispatchTwoObjectVerb(verb, restWords) {
     var obj1 = objects[ resolved1 ];
 
     var indirect = "";
-    if ( obj2Words.len() ) {
+    if ( obj2Words.len() == 1 && ( obj2Words[ 1 ] == "me" || obj2Words[ 1 ] == "myself" ) ) {
+        // PRSI == ME has no vocabulary entry to resolve against (there's no
+        // player object in `objects`); special-case it here so handleThrow
+        // can see a struct-shaped "it's the player" sentinel.
+        indirect = { "id" : "player", "name" : "yourself", "actor" : false };
+    } else if ( obj2Words.len() ) {
         var resolved2 = resolveObject( obj2Words, gameState.currentRoom );
         if ( !isSimpleValue( resolved2 ) ) {
             return resolved2.error;
@@ -2044,6 +2093,7 @@ function dispatchTwoObjectVerb(verb, restWords) {
         case "dig":     return handleDig( obj1, indirect );
         case "turn":    return handleTurn( obj1, indirect );
         case "attack":  return handleAttack( obj1, indirect );
+        case "throw":   return handleThrow( obj1, indirect );
     }
     return "I don't know how to do that yet.";
 }
