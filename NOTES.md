@@ -60,13 +60,6 @@ this is the long one, with pointers.
 - `scarab` (`zorkData.bxs:744`) stays hidden; should be diggable with the
   shovel.
 
-### Egg / canary
-- `egg` (`zorkData.bxs:829`) should break (and damage any canary inside) on
-  rough handling, becoming `broken_egg` (`zorkData.bxs:836`, never placed).
-- `canary` (`zorkData.bxs:846`) should be windable for a songbird payoff in
-  a forest room, becoming `broken_canary` (`zorkData.bxs:851`) and dropping
-  `bauble` (`zorkData.bxs:856`) — none of this is wired up.
-
 ### Boat / river
 - `inflated_boat` (`zorkData.bxs:688`) can be created (`handleInflate`,
   `"inflate boat with pump"`) but actually sailing it on river rooms isn't
@@ -75,9 +68,6 @@ this is the long one, with pointers.
   white cliffs' rocks — is never produced.
 
 ### Other single-item gaps
-- `map` (`zorkData.bxs:893`) — trigger for revealing it isn't implemented.
-- `gunk` (`zorkData.bxs:904`) — should be created when `putty` is melted by
-  the torch; never placed.
 - `broken_lamp` (`zorkData.bxs:909`) — should replace `brass_lantern` if
   it's thrown or burns out; never placed. (Relatedly: there's no lamp/match/
   candle fuel-timer system at all — light sources don't run out.)

@@ -122,7 +122,9 @@ gameState = {
         "domeFlag"      : false, // rope tied to the dome railing
         "rainbowFlag"   : false, // rainbow made solid via the sceptre
         "grateRevealed" : false, // grating spotted from below in the maze
-        "rugMoved"      : false  // rug pushed aside, revealing the trap door
+        "rugMoved"      : false, // rug pushed aside, revealing the trap door
+        "songSung"      : false, // SING-SONG: canary already wound in a forest room, bauble dropped
+        "mapRevealed"   : false  // SCORE-UPD's WON-FLAG one-shot: map uncovered in the trophy case at 350 points
     },
     // Combat (FIGHT-STRENGTH's P?STRENGTH adjustment on the player —
     // negative while wounded, recovering over time in real ZIL via the
@@ -336,9 +338,44 @@ function handleTake(obj) {
     return "Taken.";
 }
 
+// BAD-EGG: the egg (FLAGS minus OPENBIT) is replaced by broken_egg in the
+// same spot. Per ZIL, an intact canary nested inside goes down with it and
+// becomes broken_canary (nested in broken_egg); otherwise broken_canary
+// stays unplaced. Idempotent — calling this on an already-broken egg is a
+// no-op so callers don't need to check first.
+function breakEgg() {
+    if ( objects.egg.location == "" ) {
+        return;
+    }
+    var eggLocation = objects.egg.location;
+    if ( objects.canary.location == "egg" ) {
+        objects.canary.location = "";
+        objects.broken_canary.location = "broken_egg";
+        objects.broken_canary.hidden = false;
+    }
+    objects.egg.location = "";
+    objects.broken_egg.location = eggLocation;
+    objects.broken_egg.hidden = false;
+}
+
 function handleDrop(obj) {
     if ( obj.location != "player" ) {
         return "You don't have that.";
+    }
+    // TREE-ROOM's M-BEG DROP handler: dropping the egg (or the nest with the
+    // egg still in it) from up the tree is the one ZIL-verbatim "fall and
+    // break" case — ground-level drops elsewhere are just "Dropped.".
+    if ( gameState.currentRoom == "up_a_tree" ) {
+        if ( obj.id == "nest" && objects.egg.location == "nest" ) {
+            obj.location = "path";
+            breakEgg();
+            return "The nest falls to the ground, and the egg spills out of it, seriously damaged.";
+        }
+        if ( obj.id == "egg" ) {
+            obj.location = "path";
+            breakEgg();
+            return "The egg falls to the ground and springs open, seriously damaged.";
+        }
     }
     obj.location = gameState.currentRoom;
     return "Dropped.";
@@ -416,8 +453,31 @@ function handleRing(obj) {
     return "Nothing happens.";
 }
 
+// FOREST-ROOM?: forest_1/2/3, the path, and up the tree.
+FOREST_ROOMS = [ "forest_1", "forest_2", "forest_3", "path", "up_a_tree" ];
+
+// CANARY-OBJECT's WIND handling: the intact canary, wound in a forest room
+// for the first time, triggers the songbird/bauble payoff (SING-SONG);
+// elsewhere it just chirps. The broken canary only grinds unpleasantly.
 function handleWind(obj) {
-    return "Nothing happens.";
+    if ( obj.id == "broken_canary" ) {
+        return "There is an unpleasant grinding noise from inside the canary.";
+    }
+    if ( obj.id != "canary" ) {
+        return "Nothing happens.";
+    }
+    if ( !gameState.flags.songSung && FOREST_ROOMS.contains( gameState.currentRoom ) ) {
+        gameState.flags.songSung = true;
+        objects.bauble.location = gameState.currentRoom == "up_a_tree" ? "path" : gameState.currentRoom;
+        objects.bauble.hidden = false;
+        return "The canary chirps, slightly off-key, an aria from a forgotten opera.
+From out of the greenery flies a lovely songbird. It perches on a
+limb just over your head and opens its beak to sing. As it does so
+a beautiful brass bauble drops from its mouth, bounces off the top of
+your head, and lands glimmering in the grass. As the canary winds
+down, the songbird flies away.";
+    }
+    return "The canary chirps blithely, if somewhat tinnily, for a short time.";
 }
 
 function handleSearch(obj) {
@@ -442,6 +502,21 @@ function handleDiagnose() {
 
 function handleScore() {
     return "Your score is #handleScoreValue()# (total of 350 points), in #gameState.turns# move(s).";
+}
+
+// SCORE-UPD's WON-FLAG one-shot (gverbs.zil): the instant the deposited
+// score reaches 350, the map's INVISIBLE bit is cleared in the trophy case
+// and a whispered hint plays. Checked once per turn rather than only on
+// "score" so it fires the moment the last treasure is deposited, like the
+// real per-update demon check. Returns an extra line to print, or "".
+function checkMapReveal() {
+    if ( gameState.flags.mapRevealed || handleScoreValue() < SCORE_MAX ) {
+        return "";
+    }
+    gameState.flags.mapRevealed = true;
+    objects.map.hidden = false;
+    return "An almost inaudible voice whispers in your ear, ""Look to your treasures
+for the final secret.""";
 }
 
 function handleBoard(obj) {
@@ -525,7 +600,15 @@ function handleBurn(obj, indirect) {
     if ( !source.light || !source.on ) {
         return "The #source.name# isn't lit.";
     }
+    var objLocation = obj.location;
     obj.location = "";
+    // Putty melts down to a residue (small piece of vitreous slag) rather
+    // than just burning away like other burnables.
+    if ( obj.id == "putty" ) {
+        objects.gunk.location = objLocation;
+        objects.gunk.hidden = false;
+        return "The viscous material melts away, leaving behind a small piece of vitreous slag.";
+    }
     return "The #obj.name# catches fire and burns up.";
 }
 
@@ -975,6 +1058,20 @@ function tickThief() {
     );
     if ( loot.len() && randRange( 1, 100 ) <= 30 ) {
         var stolenId = loot[ randRange( 1, loot.len() ) ];
+        // The egg is fragile enough that the thief's grab-and-run snatches
+        // it roughly off the ground; breaks it just like any other rough
+        // handling (egg fragility is otherwise drop-triggered per ZIL).
+        if ( stolenId == "egg" ) {
+            breakEgg();
+            objects.broken_egg.location = "thief";
+            objects.broken_egg.hidden = true;
+            if ( objects.broken_canary.location == "broken_egg" ) {
+                objects.broken_canary.hidden = true;
+            }
+            return "You suddenly notice that the jewel-encrusted egg is gone, and you catch a
+glimpse of someone with a bag disappearing into the gloom -- it sounded
+like something inside the egg cracked.";
+        }
         objects[ stolenId ].location = "thief";
         objects[ stolenId ].hidden = true;
         return "You suddenly notice that the #objects[ stolenId ].name# is gone.";
@@ -1389,6 +1486,11 @@ function processCommand(input) {
     var thiefNote = tickThief();
     if ( thiefNote.len() ) {
         result &= NEWLINE & thiefNote;
+    }
+
+    var mapNote = checkMapReveal();
+    if ( mapNote.len() ) {
+        result &= NEWLINE & mapNote;
     }
 
     return result;
