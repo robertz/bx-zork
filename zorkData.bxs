@@ -430,13 +430,11 @@ will provide many months of trouble-free operation.",
 
     "mirror_1" : makeObject(
         "mirror_1", "mirror", [ "reflection", "mirror", "enormous" ], "", false,
-        { "scenery" : true, "noTakeMessage" : "The mirror is many times your size. Give up.", "location" : "mirror_room_1",
-          "note" : "TODO: rubbing it should teleport you to the other mirror room (Task 6)." }
+        { "scenery" : true, "noTakeMessage" : "The mirror is many times your size. Give up.", "location" : "mirror_room_1" }
     ),
     "mirror_2" : makeObject(
         "mirror_2", "mirror", [ "reflection", "mirror", "enormous" ], "", false,
-        { "scenery" : true, "noTakeMessage" : "The mirror is many times your size. Give up.", "location" : "mirror_room_2",
-          "note" : "TODO: rubbing it should teleport you to the other mirror room (Task 6)." }
+        { "scenery" : true, "noTakeMessage" : "The mirror is many times your size. Give up.", "location" : "mirror_room_2" }
     ),
 
     // --- Round Room and vicinity --------------------------------------------
@@ -685,12 +683,12 @@ attached.", true,
         "inflated_boat", "magic boat", [ "boat", "raft" ], "", true,
         { "adjectives" : [ "inflatable", "magic", "plastic", "seaworthy" ], "burnable" : true,
           "container" : true, "open" : true, "capacity" : 100, "size" : 20, "location" : "",
-          "note" : "Created by ""inflate boat with pump"" (handleInflate); actually sailing it on river rooms isn't implemented (Task 6)." }
+          "note" : "Created by ""inflate boat with pump"" (handleInflate). Board/launch/land and river drift are wired up in zorkParser.bxs (handleBoard/handleLaunch/handleLand/tickRiver)." }
     ),
     "punctured_boat" : makeObject(
         "punctured_boat", "punctured boat", [ "boat", "pile", "plastic" ], "", true,
         { "adjectives" : [ "plastic", "punctured", "large" ], "burnable" : true, "size" : 20, "location" : "",
-          "note" : "TODO: created when the inflated boat is punctured (e.g. by the white cliffs' rocks); not implemented (Task 6)." }
+          "note" : "Produced by handleBoard() when a weapon is carried aboard (RBOAT-FUNCTION's BOARD check, 1actions.zil)." }
     ),
     "boat_label" : makeObject(
         "boat_label", "tan label", [ "label", "fineprint", "print" ],
