@@ -1586,18 +1586,31 @@ walls. There is a narrow beach to land on.",
 
     "mirror_room_1" : {
         "id" : "mirror_room_1", "name" : "Mirror Room",
-        "description" :
+        // MIRROR-ROOM's M-LOOK: appends the MIRROR-MUNG destroyed-mirror line.
+        "dynamicDescription" : () => {
+            var text =
 "You are in a large square room with tall ceilings. On the south wall
 is an enormous mirror which fills the entire wall. There are exits
-on the other three sides of the room.",
+on the other three sides of the room.";
+            if ( gameState.flags.mirrorBroken ) {
+                text &= NEWLINE & "Unfortunately, the mirror has been destroyed by your recklessness.";
+            }
+            return text;
+        },
         "exits" : { "north" : "cold_passage", "west" : "twisting_passage", "east" : "small_cave" }
     },
     "mirror_room_2" : {
         "id" : "mirror_room_2", "name" : "Mirror Room",
-        "description" :
+        "dynamicDescription" : () => {
+            var text =
 "You are in a large square room with tall ceilings. On the south wall
 is an enormous mirror which fills the entire wall. There are exits
-on the other three sides of the room.",
+on the other three sides of the room.";
+            if ( gameState.flags.mirrorBroken ) {
+                text &= NEWLINE & "Unfortunately, the mirror has been destroyed by your recklessness.";
+            }
+            return text;
+        },
         "exits" : { "west" : "winding_passage", "north" : "narrow_passage", "east" : "tiny_cave" }
     },
     "small_cave" : {
