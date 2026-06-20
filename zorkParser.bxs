@@ -383,7 +383,38 @@ function handleRead(obj) {
     if ( !obj.readable ) {
         return "There's nothing written on the #obj.name#.";
     }
+    if ( obj.id == "book" ) {
+        var ceremony = handleExorciseReading();
+        if ( ceremony.len() ) {
+            return ceremony;
+        }
+    }
     return obj.text;
+}
+
+// LLD-ROOM M-BEG's READ ,BOOK clause: with the ghosts already cowed by the
+// hot bell and the candles lit, reading the book completes the ceremony —
+// banishes the ghosts and sets lldFlag, unblocking the gate. Returns ""
+// (falls through to the book's ordinary text) unless all the conditions
+// for the climactic line are met.
+function handleExorciseReading() {
+    if ( gameState.currentRoom != "entrance_to_hades" || gameState.flags.lldFlag ) {
+        return "";
+    }
+    if ( objects.hot_bell.location != "entrance_to_hades" && objects.hot_bell.location != "player" ) {
+        return "";
+    }
+    if ( objects.candles.location != "player" || !objects.candles.on ) {
+        return "";
+    }
+
+    gameState.flags.lldFlag = true;
+    objects.ghosts.location = "";
+
+    return "Each word of the prayer reverberates through the hall in a deafening
+confusion. As the last word fades, a voice, loud and commanding,
+speaks: ""Begone, fiends!"" A heart-stopping scream fills the cavern,
+and the spirits, sensing a greater power, flee through the walls.";
 }
 
 function carriedIds() {
@@ -412,8 +443,34 @@ function handleWave(obj) {
     return "Nothing happens.";
 }
 
+// BELL-F/LLD-ROOM M-BEG: ringing the bell at the Hades gate while the
+// ghosts still bar the way scares them into a paralyzed silence and
+// scorches the bell red hot (HOT-BELL). Any lit candles you're holding
+// drop and go out in the confusion, same as the ZIL text. Ringing it
+// anywhere else, or after the ghosts are already banished, does nothing.
 function handleRing(obj) {
-    return "Nothing happens.";
+    if ( obj.id != "bell" ) {
+        return "Nothing happens.";
+    }
+    if ( gameState.currentRoom != "entrance_to_hades" || gameState.flags.lldFlag ) {
+        return "Nothing happens.";
+    }
+
+    obj.location = "";
+    objects.hot_bell.location = gameState.currentRoom;
+
+    var lines = [ "The bell suddenly becomes red hot and falls to the ground. The
+wraiths, as if paralyzed, stop their jeering and slowly turn to face
+you. On their ashen faces, the expression of a long-forgotten terror
+takes shape." ];
+
+    if ( objects.candles.location == "player" ) {
+        objects.candles.on = false;
+        objects.candles.location = gameState.currentRoom;
+        lines.append( "In your confusion, the candles drop to the ground (and they are out)." );
+    }
+
+    return lines.toList( NEWLINE );
 }
 
 function handleWind(obj) {
@@ -432,7 +489,19 @@ function handleListenVerb() {
     return "You hear nothing unusual.";
 }
 
+// SOUTH-TEMPLE-FCN's COFFIN-CURE check: in the real game this is set
+// automatically on entering the Altar without the coffin, but per this
+// task it's wired to the PRAY verb instead — praying at the Altar lifts
+// the curse as long as you aren't lugging the coffin around with you.
 function handlePray() {
+    if ( gameState.currentRoom == "south_temple" ) {
+        if ( objects.coffin.location == "player" ) {
+            return "Your prayers are not heard while you bear the weight of the coffin.";
+        }
+        gameState.flags.coffinCure = true;
+        return "Your prayers are heard. The curse upon the coffin is lifted, and you
+sense it is now safe to carry it below.";
+    }
     return "Nothing happens.";
 }
 
@@ -500,6 +569,16 @@ function handleExtinguish(obj) {
 // "light X" turns on a light source, or sets fire to a burnable one —
 // mirrors how ZIL's LAMP-ON/BURN verbs overlap on the word "light".
 function handleLight(obj) {
+    if ( obj.id == "candles" ) {
+        var result = handleTurnOn( obj );
+        if ( obj.on ) {
+            var ceremonyNote = checkHadesCeremonyProgress();
+            if ( ceremonyNote.len() ) {
+                result &= NEWLINE & ceremonyNote;
+            }
+        }
+        return result;
+    }
     if ( obj.light ) {
         return handleTurnOn( obj );
     }
@@ -507,6 +586,23 @@ function handleLight(obj) {
         return handleBurn( obj, "" );
     }
     return "You can't light that.";
+}
+
+// I-XB/I-XC simplified: lighting the candles after the bell has scared the
+// ghosts off (hot_bell on the ground at the Hades gate) is the second step
+// of the exorcism — "the earth trembles" beat from LLD-ROOM's M-END. No
+// turn-based forgiveness window is modeled (this engine has no demon
+// queue); the only requirement is having rung the bell first.
+function checkHadesCeremonyProgress() {
+    if ( gameState.currentRoom != "entrance_to_hades" || gameState.flags.lldFlag ) {
+        return "";
+    }
+    if ( objects.hot_bell.location != "entrance_to_hades" && objects.hot_bell.location != "player" ) {
+        return "";
+    }
+    return "The flames flicker wildly and appear to dance. The earth beneath
+your feet trembles, and your legs nearly buckle beneath you.
+The spirits cower at your unearthly power.";
 }
 
 function findLitLightSource() {

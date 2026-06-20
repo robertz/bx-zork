@@ -16,19 +16,6 @@ this is the long one, with pointers.
   deposited in the `trophy_case`, but there's no rank table or "you have
   won" sequence.
 
-### Hades exorcism
-- `lldFlag` (`zorkParser.bxs:120`) never gets set. The EXORCISE ceremony
-  (bell/book/candles) isn't wired up — see `ghosts` (`zorkData.bxs:464`).
-  The gate to `land_of_living_dead` stays blocked (`zorkData.bxs:1669-1670`).
-- `hot_bell` (`zorkData.bxs:316`) — the alternate state of `bell` after
-  being held over the torch — is defined but never produced; no
-  bell/torch state-swap logic exists.
-
-### Coffin curse
-- `coffinCure` (`zorkParser.bxs:121`) never gets set; praying doesn't lift
-  it. `egyptian_room`'s `down` exit to `tiny_cave` stays blocked
-  (`zorkData.bxs:1751`).
-
 ### Dam / reservoir
 - Turning the bolt with the wrench toggles `lowTide` directly
   (`handleTurn`); the real `GATES-OPEN` transitional state and gate-flag
@@ -97,3 +84,17 @@ A few objects carry a `note` that's just situational context, not a gap:
   he's defeated, then reachable; this works (combat is implemented).
 - `axe` (`zorkData.bxs:329`) — held by the troll until defeated, then on
   the ground; this works.
+
+## Implemented since this was written
+
+- **Hades exorcism**: `lldFlag` is now set by the bell/book/candles
+  ceremony, ported from `LLD-ROOM`'s `M-BEG` clause in `1actions.zil`.
+  Ringing the `bell` at `entrance_to_hades` (`handleRing`) scares off the
+  `ghosts` and swaps it for `hot_bell`, dropping any lit `candles` you're
+  holding. Lighting the `candles` again and then reading the `book`
+  there (`handleLight`/`handleRead`) completes the ceremony, removes the
+  `ghosts`, and sets `lldFlag`, unblocking the gate to
+  `land_of_living_dead`.
+- **Coffin curse**: `coffinCure` is now set by `pray` (`handlePray`) at
+  `south_temple`, as long as you aren't carrying the `coffin` at the
+  time — unblocking `south_temple`'s `down` exit to `tiny_cave`.
