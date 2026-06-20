@@ -129,7 +129,13 @@ gameState = {
     // I-CURE demon; here it just stays put between fights since there's no
     // turn-based healing demon implemented).
     "playerStrengthAdjustment" : 0,
-    "playerDead" : false
+    "playerDead" : false,
+    "gameWon" : false,
+    // BASE-SCORE: one-time points banked the moment a treasure is first
+    // taken (object.value, zeroed after scoring so it can't repeat). Added
+    // to the trophy case's live TVALUE total to get the real ,SCORE — see
+    // handleScoreValue().
+    "baseScore" : 0
 };
 
 function buildVerbIndex() {
@@ -167,6 +173,35 @@ function buildVocabulary(allObjects) {
 
 VERB_INDEX  = buildVerbIndex();
 VOCABULARY  = buildVocabulary( objects );
+
+// skull's only route (land_of_living_dead) is gated on lldFlag, which the
+// Hades exorcism never sets (not implemented — see NOTES.md). Every other
+// permanently-unreachable treasure is already excluded below by virtue of
+// starting `hidden` or unplaced (trunk/scarab/pot_of_gold need dam-drain/
+// dig/rainbow; diamond/broken_egg/bauble are never placed — coal machine,
+// egg-break), so this is the one case that needs calling out explicitly.
+UNREACHABLE_TREASURES = [ "skull" ];
+
+// Highest ,SCORE reachable under the treasures currently ported (take
+// value + deposit value, summed before anything is taken/deposited and
+// mutated) — and also the win-condition threshold (see
+// checkEndgameTrigger()). The original totals 350; this is whatever's
+// actually obtainable with what's wired up so far. As each blocked
+// puzzle above gets implemented and starts placing/revealing/unlocking
+// its treasure, this recomputes higher automatically.
+function computeTreasureMaxScore(allObjects) {
+    var total = 0;
+    for ( var id in allObjects ) {
+        var obj = allObjects[ id ];
+        if ( obj.hidden || !obj.location.len() || UNREACHABLE_TREASURES.contains( id ) ) {
+            continue;
+        }
+        total += obj.value + obj.treasureValue;
+    }
+    return total;
+}
+
+TREASURE_MAX_SCORE = computeTreasureMaxScore( objects );
 
 function tokenize(input) {
     return reMatch( "[a-zA-Z']+", input.lcase() );
@@ -333,6 +368,10 @@ function handleTake(obj) {
         return obj.noTakeMessage.len() ? obj.noTakeMessage : "You can't take that.";
     }
     obj.location = "player";
+    if ( obj.value > 0 ) {
+        gameState.baseScore += obj.value;
+        obj.value = 0;
+    }
     return "Taken.";
 }
 
@@ -440,8 +479,30 @@ function handleDiagnose() {
     return "You are in perfect health.";
 }
 
+// V-SCORE's rank table, verbatim thresholds (out of the original 350).
+function scoreRank(score) {
+    if ( score == 350 ) {
+        return "Master Adventurer";
+    } else if ( score > 330 ) {
+        return "Wizard";
+    } else if ( score > 300 ) {
+        return "Master";
+    } else if ( score > 200 ) {
+        return "Adventurer";
+    } else if ( score > 100 ) {
+        return "Junior Adventurer";
+    } else if ( score > 50 ) {
+        return "Novice Adventurer";
+    } else if ( score > 25 ) {
+        return "Amateur Adventurer";
+    }
+    return "Beginner";
+}
+
 function handleScore() {
-    return "Your score is #handleScoreValue()# (total of 350 points), in #gameState.turns# move(s).";
+    var points = handleScoreValue();
+    return "Your score is #points# (total of 350 points), in #gameState.turns# move(s)." &
+        NEWLINE & "This gives you the rank of #scoreRank( points )#.";
 }
 
 function handleBoard(obj) {
@@ -603,9 +664,13 @@ function fightStrength(adjust = true) {
     return adjust ? s + gameState.playerStrengthAdjustment : s;
 }
 
+// OTVAL-FROB + BASE-SCORE: the trophy case's current TVALUE total (which
+// drops if a treasure is removed) plus the one-time take points already
+// banked in gameState.baseScore (which don't). Also what FIGHT-STRENGTH
+// scales off of, same as real ZIL's ,SCORE.
 function handleScoreValue() {
     var deposited = objects.keyArray().filter( (id) => objects[ id ].location == "trophy_case" );
-    var points = 0;
+    var points = gameState.baseScore;
     for ( var id in deposited ) {
         points += objects[ id ].treasureValue;
     }
@@ -778,6 +843,23 @@ MELEE_TABLES = { "TROLL_MELEE" : TROLL_MELEE, "THIEF_MELEE" : THIEF_MELEE, "CYCL
 function endGame(message) {
     gameState.playerDead = true;
     return message & NEWLINE & NEWLINE & "    ****  You have died  ****" & NEWLINE & NEWLINE & "The game is over.";
+}
+
+function endGameWin(message) {
+    gameState.gameWon = true;
+    return message & NEWLINE & NEWLINE & "    ****  You have won  ****" & NEWLINE & NEWLINE & "The game is over.";
+}
+
+// SCORE-UPD's WON-FLAG check: the moment every treasure has been both
+// taken (banked in baseScore) and deposited (live in the trophy case),
+// nudge the player toward the barrow rather than silently flipping
+// wonFlag with no feedback.
+function checkEndgameTrigger() {
+    if ( !gameState.flags.wonFlag && handleScoreValue() >= TREASURE_MAX_SCORE ) {
+        gameState.flags.wonFlag = true;
+        return NEWLINE & "An almost inaudible voice whispers in your ear, ""Look to your treasures for the final secret.""";
+    }
+    return "";
 }
 
 // Applies a blow outcome to the player; returns "" normally, or a death
@@ -1190,7 +1272,13 @@ function enterRoom(roomId) {
     gameState.currentRoom = roomId;
     var room = rooms[ roomId ];
     if ( room.keyExists( "onEnter" ) ) {
-        room.onEnter();
+        var hookResult = room.onEnter();
+        // Most onEnter hooks are side-effect-only (flip a flag, reveal an
+        // object) and return nothing; a few (the barrow's ending) return
+        // text that should replace the room description entirely.
+        if ( !isNull( hookResult ) && isSimpleValue( hookResult ) && hookResult.len() ) {
+            return hookResult;
+        }
     }
     return describeRoom( room );
 }
@@ -1381,6 +1469,9 @@ function processCommand(input) {
     if ( gameState.playerDead ) {
         return "You are dead. The game is over.";
     }
+    if ( gameState.gameWon ) {
+        return "You have already won. The game is over.";
+    }
 
     gameState.turns += 1;
 
@@ -1389,6 +1480,11 @@ function processCommand(input) {
     var thiefNote = tickThief();
     if ( thiefNote.len() ) {
         result &= NEWLINE & thiefNote;
+    }
+
+    var endgameNote = checkEndgameTrigger();
+    if ( endgameNote.len() ) {
+        result &= endgameNote;
     }
 
     return result;
@@ -1471,7 +1567,7 @@ function runInteractive() {
         }
         println( processCommand( line ) );
         println( "" );
-        if ( gameState.playerDead ) {
+        if ( gameState.playerDead || gameState.gameWon ) {
             break;
         }
     }

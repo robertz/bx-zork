@@ -6,20 +6,35 @@ A consolidated list of everything not (yet) implemented, gathered from the
 [What's not (yet)](README.md#whats-not-yet) section for the short version —
 this is the long one, with pointers.
 
-## Genuinely unimplemented
+## Implemented since this was written
 
 ### Endgame / scoring
-- `wonFlag` (`zorkParser.bxs:115`) never gets set — no win condition.
-  `stone_barrow`'s `sw`/`in` exits (`zorkData.bxs:939-940`) are permanently
-  blocked as a result.
-- `score`/`handleScore()` (`zorkParser.bxs:443,606`) totals treasures
-  deposited in the `trophy_case`, but there's no rank table or "you have
-  won" sequence.
+Take points (`value`) are now banked once per treasure in
+`gameState.baseScore` (`handleTake`, `zorkParser.bxs:328`), added to the
+trophy case's live deposit total (`treasureValue`) in `handleScoreValue()`.
+`handleScore()` reports a rank from `scoreRank()`, a verbatim port of
+V-SCORE's thresholds. `checkEndgameTrigger()` sets `wonFlag` once score
+hits `TREASURE_MAX_SCORE` — the achievable max given what's reachable right
+now (it excludes treasures still gated on the unimplemented puzzles below:
+trunk, scarab, pot_of_gold, diamond, broken_egg, bauble, skull — see
+`zorkParser.bxs:177-198`). Once `wonFlag` is set, `stone_barrow`'s `sw`/`in`
+exits open, and walking in there fires the verbatim ZIL ending
+(`stone_barrow.onEnter`, `zorkData.bxs:946-968`) via `endGameWin()`.
+
+As each puzzle below gets implemented and starts placing/revealing its
+treasure, `TREASURE_MAX_SCORE` recomputes higher automatically — except
+`skull`, which needs an explicit removal from `UNREACHABLE_TREASURES`
+(`zorkParser.bxs:182`) once Hades exorcism is wired up, since `lldFlag`
+gating it isn't detectable from `hidden`/`location` alone.
+
+## Genuinely unimplemented
 
 ### Hades exorcism
 - `lldFlag` (`zorkParser.bxs:120`) never gets set. The EXORCISE ceremony
   (bell/book/candles) isn't wired up — see `ghosts` (`zorkData.bxs:464`).
-  The gate to `land_of_living_dead` stays blocked (`zorkData.bxs:1669-1670`).
+  The gate to `land_of_living_dead` stays blocked (`zorkData.bxs:1669-1670`),
+  which is also why `skull` sits in `UNREACHABLE_TREASURES`
+  (`zorkParser.bxs:182`) — remove it from there once this is fixed.
 - `hot_bell` (`zorkData.bxs:316`) — the alternate state of `bell` after
   being held over the torch — is defined but never produced; no
   bell/torch state-swap logic exists.

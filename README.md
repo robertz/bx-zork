@@ -166,15 +166,23 @@ puzzles set and exits/descriptions read.
   all fightable, with the cyclops's `STRENGTH 10000` making direct combat
   with him exactly as suicidal as it is in the original (use `odysseus`/`ulysses`
   or give him water instead).
+- **Scoring and the endgame**: taking a treasure banks its points once,
+  depositing it in the trophy case banks the rest — same split as ZIL's
+  `VALUE`/`TVALUE`. `score` reports a rank from a verbatim port of
+  `V-SCORE`'s table. Collecting and depositing everything currently
+  reachable sets `wonFlag`, unlocking the path from West of House to the
+  Stone Barrow; walking in triggers the real ending text and ends the game.
 
 ## What's not (yet)
 
 Everything not listed above is either a `note` field on the relevant object
 in `zorkData.bxs` or a generic "nothing happens" response: lamp/match/candle
 fuel timers, the Hades exorcism, the dam's full multi-stage drain sequence,
-mirror-room teleportation, the coal mine puzzles, the rainbow/sceptre,
-egg/canary fragility, and the scoring/endgame (treasure deposit scoring
-exists via `score`, but there's no win condition or rank table yet).
+mirror-room teleportation, the coal mine puzzles, the rainbow/sceptre, and
+egg/canary fragility. A handful of treasures gated behind those puzzles
+(trunk, scarab, pot_of_gold, diamond, broken_egg, bauble, skull) aren't
+counted toward the win condition yet either — see [NOTES.md](NOTES.md) for
+specifics.
 
 If you're picking this up: search for `TODO` and `note` in `zorkData.bxs` —
 every known gap is annotated in place rather than silently faked.

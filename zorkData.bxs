@@ -941,8 +941,13 @@ rooms = {
         }
     },
 
-    // Endgame room. Only reachable once every treasure has been deposited
-    // in the trophy case (see Task 7 — scoring/endgame, not yet wired up).
+    // Endgame room. Only reachable once every treasure has been both taken
+    // and deposited in the trophy case (wonFlag, set by
+    // checkEndgameTrigger() in zorkParser.bxs). Entering it ends the game —
+    // STONE-BARROW-FCN's text, ported verbatim, normally only fires on a
+    // separate "enter"/"through barrow" command once standing here; that
+    // extra step is collapsed into onEnter since there's nothing else to do
+    // in this room.
     "stone_barrow" : {
         "id"          : "stone_barrow",
         "name"        : "Stone Barrow",
@@ -951,7 +956,23 @@ rooms = {
 is a huge stone door which is open. You cannot see into the dark of the tomb.",
         "exits"       : {
             "ne" : "west_of_house"
-        }
+        },
+        "onEnter" : () => endGameWin(
+"Inside the Barrow
+As you enter the barrow, the door closes inexorably behind you. Around
+you it is dark, but ahead is an enormous cavern, brightly lit. Through
+its center runs a wide stream. Spanning the stream is a small wooden
+footbridge, and beyond a path leads into a dark tunnel. Above the
+bridge, floating in the air, is a large sign. It reads:  All ye who
+stand before this bridge have completed a great and perilous adventure
+which has tested your wit and courage. You have mastered
+the first part of the ZORK trilogy. Those who pass over this bridge must be
+prepared to undertake an even greater adventure that will severely test your
+skill and bravery!
+
+The ZORK trilogy continues with ""ZORK II: The Wizard of Frobozz"" and
+is completed in ""ZORK III: The Dungeon Master."""
+        )
     },
 
     "north_of_house" : {
