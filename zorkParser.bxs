@@ -197,23 +197,31 @@ VOCABULARY  = buildVocabulary( objects );
 
 // Treasures whose only route is gated on a flag that computeTreasureMaxScore()
 // can't detect just by checking `hidden`/`location` (those cases are excluded
-// automatically below). Empty now that Hades exorcism sets lldFlag, unblocking
-// `skull`'s route through land_of_living_dead — kept around since the next
-// puzzle gated this way will need the same treatment.
+// automatically below). Empty for now — kept around for the next puzzle that
+// turns out to need this treatment.
 UNREACHABLE_TREASURES = [];
+
+// Treasures that start `hidden`/unplaced (so the generic check below would
+// otherwise skip them) but whose reveal puzzle is now implemented and is
+// always worth pursuing: trunk (reservoir drain), scarab (dig), pot_of_gold
+// (wave sceptre), diamond (coal machine). Deliberately NOT listed:
+// broken_egg/broken_canary/bauble — winding the canary or breaking the egg
+// nets fewer points than leaving them intact (they have little/no value of
+// their own), so the optimal-play max never goes through them.
+FORCE_REACHABLE_TREASURES = [ "trunk", "scarab", "pot_of_gold", "diamond" ];
 
 // Highest ,SCORE reachable under the treasures currently ported (take
 // value + deposit value, summed before anything is taken/deposited and
 // mutated) — and also the win-condition threshold (see
 // checkEndgameTrigger()). The original totals 350; this is whatever's
-// actually obtainable with what's wired up so far. As each blocked
-// puzzle above gets implemented and starts placing/revealing/unlocking
-// its treasure, this recomputes higher automatically.
+// actually obtainable with what's wired up so far under optimal play.
 function computeTreasureMaxScore(allObjects) {
     var total = 0;
     for ( var id in allObjects ) {
         var obj = allObjects[ id ];
-        if ( obj.hidden || !obj.location.len() || UNREACHABLE_TREASURES.contains( id ) ) {
+        var forced = FORCE_REACHABLE_TREASURES.contains( id );
+        var normallyReachable = !obj.hidden && obj.location.len();
+        if ( UNREACHABLE_TREASURES.contains( id ) || !( forced || normallyReachable ) ) {
             continue;
         }
         total += obj.value + obj.treasureValue;

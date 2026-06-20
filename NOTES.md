@@ -13,19 +13,33 @@ Take points (`value`) are now banked once per treasure in
 `gameState.baseScore` (`handleTake`, `zorkParser.bxs:328`), added to the
 trophy case's live deposit total (`treasureValue`) in `handleScoreValue()`.
 `handleScore()` reports a rank from `scoreRank()`, a verbatim port of
-V-SCORE's thresholds. `checkEndgameTrigger()` sets `wonFlag` once score
-hits `TREASURE_MAX_SCORE` — the achievable max given what's reachable right
-now (it excludes treasures still gated on the unimplemented puzzles below:
-trunk, scarab, pot_of_gold, diamond, broken_egg, bauble, skull — see
-`zorkParser.bxs:177-198`). Once `wonFlag` is set, `stone_barrow`'s `sw`/`in`
-exits open, and walking in there fires the verbatim ZIL ending
-(`stone_barrow.onEnter`, `zorkData.bxs:946-968`) via `endGameWin()`.
+V-SCORE's thresholds. `checkEndgameTrigger()` sets `wonFlag` (and reveals
+`map`) once score hits `TREASURE_MAX_SCORE`, the max achievable under
+optimal play. Once `wonFlag` is set, `stone_barrow`'s `sw`/`in` exits open,
+and walking in there fires the verbatim ZIL ending (`stone_barrow.onEnter`,
+`zorkData.bxs:946-968`) via `endGameWin()`.
 
-As each puzzle below gets implemented and starts placing/revealing its
-treasure, `TREASURE_MAX_SCORE` recomputes higher automatically — except
-`skull`, which needed an explicit removal from `UNREACHABLE_TREASURES`
-(`zorkParser.bxs:182`) once Hades exorcism was wired up (done — see below),
-since `lldFlag` gating it isn't detectable from `hidden`/`location` alone.
+`computeTreasureMaxScore()` (`zorkParser.bxs:198-230`) can't just sum every
+treasure's `value`/`treasureValue` at load — most genuinely-unobtainable
+ones start `hidden` or unplaced (`location: ""`), which is exactly how it
+tells them apart from ordinary treasures sitting in their starting room.
+Two explicit lists patch the cases that heuristic gets wrong:
+- `FORCE_REACHABLE_TREASURES` — `trunk`/`scarab`/`pot_of_gold`/`diamond`
+  start `hidden`/unplaced too, but their reveal puzzles are now
+  implemented and always worth pursuing, so they're force-included.
+  Deliberately *not* listed: `broken_egg`/`broken_canary`/`bauble` —
+  breaking the egg or winding the canary nets *fewer* points than leaving
+  them intact (they're worth little to nothing on their own), so optimal
+  play never goes through them; they stay excluded.
+- `UNREACHABLE_TREASURES` — for a treasure that doesn't start
+  `hidden`/unplaced but is still genuinely gated by a flag the heuristic
+  above can't see (`skull`'s only route needed `lldFlag`, before Hades
+  exorcism was implemented). Currently empty — kept for the next puzzle
+  that needs this treatment.
+
+Current achievable max is 270 (out of the original 350 — the gap is
+mostly the unimplemented Hades-demon/fuel-timer point sources, not
+missing treasures).
 
 ### Hades exorcism
 `lldFlag` is now set by the bell/book/candles ceremony, ported from
