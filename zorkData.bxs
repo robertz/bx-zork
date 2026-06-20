@@ -603,7 +603,7 @@ excised them.",
     ),
     "putty" : makeObject(
         "putty", "viscous material", [ "material", "gunk" ], "", true,
-        { "adjectives" : [ "viscous" ], "tool" : true, "size" : 6, "location" : "tube" }
+        { "adjectives" : [ "viscous" ], "tool" : true, "burnable" : true, "size" : 6, "location" : "tube" }
     ),
     "leak" : makeObject(
         "leak", "leak", [ "leak", "drip", "pipe" ], "", false,
@@ -837,8 +837,9 @@ is obviously deranged and holding his nose.",
         { "adjectives" : [ "birds" ], "container" : true, "openable" : true, "open" : true,
           "capacity" : 20, "location" : "up_a_tree" }
     ),
-    // ACTION EGG-OBJECT (fragility/breaking on rough handling) is a puzzle
-    // mechanic not implemented — take/examine/open only (Task 6).
+    // EGG-OBJECT/CANARY-OBJECT/BAD-EGG (fragility on rough handling, plus
+    // canary winding) are implemented via breakEgg()/handleDrop()/
+    // tickThief()/handleWind() in zorkParser.bxs.
     "egg" : makeObject(
         "egg", "jewel-encrusted egg", [ "egg", "treasure" ],
 "In the bird's nest is a large egg encrusted with precious jewels,
@@ -848,15 +849,14 @@ Unlike most eggs, this one is hinged and closed with a delicate looking
 clasp. The egg appears extremely fragile.",
         true,
         { "adjectives" : [ "birds", "encrusted", "jeweled" ], "container" : true, "openable" : true,
-          "open" : false, "capacity" : 6, "value" : 5, "treasureValue" : 5, "location" : "nest",
-          "note" : "TODO: breaks (and damages any canary inside) on rough handling; not implemented (Task 6)." }
+          "open" : false, "capacity" : 6, "value" : 5, "treasureValue" : 5, "location" : "nest" }
     ),
     "broken_egg" : makeObject(
         "broken_egg", "broken jewel-encrusted egg", [ "egg", "treasure" ],
         "There is a somewhat ruined egg here.", true,
         { "adjectives" : [ "broken", "birds", "encrusted", "jewel" ], "container" : true, "open" : true,
           "capacity" : 6, "treasureValue" : 2, "location" : "",
-          "note" : "TODO: replaces `egg` once it's broken (Task 6); not placed until then." }
+          "note" : "Not placed at load; breakEgg() (zorkParser.bxs) moves it in to replace `egg` once broken." }
     ),
     "canary" : makeObject(
         "canary", "golden clockwork canary", [ "canary", "treasure" ],
@@ -865,18 +865,17 @@ eyes and a silver beak. Through a crystal window below its left
 wing you can see intricate machinery inside. It appears to have
 wound down.",
         true,
-        { "adjectives" : [ "clockwork", "gold", "golden" ], "value" : 6, "treasureValue" : 4, "location" : "egg",
-          "note" : "TODO: winding it (with the bauble payoff in a forest room) not implemented (Task 6)." }
+        { "adjectives" : [ "clockwork", "gold", "golden" ], "value" : 6, "treasureValue" : 4, "location" : "egg" }
     ),
     "broken_canary" : makeObject(
         "broken_canary", "broken clockwork canary", [ "canary", "treasure" ], "", true,
         { "adjectives" : [ "broken", "clockwork", "gold", "golden" ], "location" : "",
-          "note" : "TODO: replaces `canary` once it's broken (Task 6); not placed until then." }
+          "note" : "Not placed at load; breakEgg() (zorkParser.bxs) moves it into `broken_egg` if the canary was inside when it broke." }
     ),
     "bauble" : makeObject(
         "bauble", "beautiful brass bauble", [ "bauble", "treasure" ], "", true,
         { "adjectives" : [ "brass", "beautiful" ], "value" : 1, "treasureValue" : 1, "location" : "",
-          "note" : "TODO: dropped by the songbird after winding the canary (Task 6); not placed until then." }
+          "note" : "Not placed at load; handleWind() (zorkParser.bxs) drops it once the canary is wound in a forest room." }
     ),
 
     // --- Reservoir / Atlantis treasures, dome, temple (continued) -------------------
@@ -913,7 +912,7 @@ wound down.",
 a house. Three paths leave the large clearing. One of these paths, leading
 southwest, is marked ""To Stone Barrow"".",
             "location" : "trophy_case", "hidden" : true,
-            "note" : "TODO: trigger for revealing the map isn't implemented (Task 6)."
+            "note" : "Reveal trigger (SCORE-UPD's WON-FLAG one-shot at 350 points) is checkMapReveal() in zorkParser.bxs, run once per turn from processCommand()."
         }
     ),
     "leaves" : makeObject(
@@ -924,7 +923,7 @@ southwest, is marked ""To Stone Barrow"".",
     "gunk" : makeObject(
         "gunk", "small piece of vitreous slag", [ "gunk", "piece", "slag" ], "", true,
         { "adjectives" : [ "small", "vitreous" ], "size" : 10, "location" : "",
-          "note" : "TODO: created when the putty is melted by the torch (Task 6); not placed until then." }
+          "note" : "Not placed at load; handleBurn() (zorkParser.bxs) special-cases putty to leave this behind instead of vanishing." }
     ),
     "broken_lamp" : makeObject(
         "broken_lamp", "broken lantern", [ "lamp", "lantern" ], "", true,

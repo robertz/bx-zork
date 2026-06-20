@@ -76,18 +76,33 @@ room from the `BAT-DROPS` pool. New `raise`/`lower` verbs
 `raised_basket`/`lowered_basket` between `shaft_room`/`lower_shaft` along
 with their contents, tracked via `gameState.flags.cageTop`.
 
+### Egg / canary
+New `breakEgg()` helper (ports `BAD-EGG`) replaces `egg` with `broken_egg`
+in place, taking any nested `canary` to `broken_canary` with it; wired into
+`handleDrop()` (dropping it, or the nest with the egg still inside, from
+`up_a_tree`) and `tickThief()` (the thief stealing it also breaks it — a
+deliberate extension past plain ZIL, where theft just relocates treasures
+intact). `handleWind()` now triggers the canary's songbird/bauble payoff
+(ported from `CANARY-OBJECT`) the first time you wind it intact in a
+forest room (`gameState.flags.songSung` makes it one-shot); winding it
+afterward, or winding `broken_canary`, does nothing further.
+
+### Other single-item gaps
+- `map` (`zorkData.bxs:893`) now reveals itself the moment `wonFlag` is set
+  (folded into `checkEndgameTrigger()`, `zorkParser.bxs:1186`, rather than
+  a separate one-shot check — real `SCORE-UPD` flips `WON-FLAG` and clears
+  the map's `INVISIBLE` in the same breath, so this is the one event, not
+  two).
+- `gunk` (`zorkData.bxs:904`) is now produced when `putty` (now
+  `burnable`) is burned, via a `handleBurn()` special case — note this
+  specific mechanic isn't actually in ZIL (real ZIL never lets you burn
+  putty), but was implemented as directed.
+
 ## Genuinely unimplemented
 
 ### Mirror rooms
 - `mirror_1`/`mirror_2` (`zorkData.bxs:434,439`) — rubbing either should
   teleport you to the other one. Not implemented.
-
-### Egg / canary
-- `egg` (`zorkData.bxs:829`) should break (and damage any canary inside) on
-  rough handling, becoming `broken_egg` (`zorkData.bxs:836`, never placed).
-- `canary` (`zorkData.bxs:846`) should be windable for a songbird payoff in
-  a forest room, becoming `broken_canary` (`zorkData.bxs:851`) and dropping
-  `bauble` (`zorkData.bxs:856`) — none of this is wired up.
 
 ### Boat / river
 - `inflated_boat` (`zorkData.bxs:688`) can be created (`handleInflate`,
@@ -97,9 +112,6 @@ with their contents, tracked via `gameState.flags.cageTop`.
   white cliffs' rocks — is never produced.
 
 ### Other single-item gaps
-- `map` (`zorkData.bxs:893`) — trigger for revealing it isn't implemented.
-- `gunk` (`zorkData.bxs:904`) — should be created when `putty` is melted by
-  the torch; never placed.
 - `broken_lamp` (`zorkData.bxs:909`) — should replace `brass_lantern` if
   it's thrown or burns out; never placed. (Relatedly: there's no lamp/match/
   candle fuel-timer system at all — light sources don't run out.)
