@@ -38,10 +38,11 @@ Directions: `north`/`n`, `south`/`s`, `east`/`e`, `west`/`w`, `ne`, `nw`, `se`, 
 | Arity | Verbs |
 |---|---|
 | No object | `look` (`l`), `inventory` (`i`/`inv`), `score`, `pray`, `diagnose`, `listen`, `launch`, `odysseus`/`ulysses` |
-| One object | `examine`/`x`/`inspect`, `take`/`get`/`grab`, `drop`, `open`, `close`/`shut`, `read`, `drink`/`sip`, `climb`/`scale`, `wave`/`shake`, `ring`, `wind`, `push`/`move`/`shove`, `board`, `search`, `light`, `extinguish`/`douse`, `turn on`, `turn off`, `smell`/`sniff` (also works with no object) |
+| One object | `examine`/`x`/`inspect`, `take`/`get`/`grab`, `drop`, `open`, `close`/`shut`, `read`, `drink`/`sip`, `climb`/`scale`, `wave`/`shake`, `ring`, `wind`, `push`/`move`/`shove`, `board`, `search`, `light`, `extinguish`/`douse`, `turn on`, `turn off`, `raise`/`lift`, `lower`, `rub`, `smell`/`sniff` (also works with no object) |
 | Two objects (`verb X <prep> Y`) | `give X to Y`, `put X in/into/on/onto Y`, `tie X to Y`, `unlock X with Y`, `lock X with Y`, `pour X on/onto/in/into Y`, `fill X with Y`, `inflate X with Y`, `burn X with Y`, `dig X with Y`, `turn X with Y`, `attack X with Y` |
 
-`quit`/`exit` ends an interactive session.
+Also: `land` (come ashore while boating the river). `quit`/`exit` ends an
+interactive session.
 
 ## How a command becomes a result
 
@@ -156,11 +157,7 @@ puzzles set and exits/descriptions read.
 
 - **The full map**: all 110 rooms and 122 objects from `1dungeon.zil`,
   descriptions and synonyms taken verbatim.
-- **~35 verbs**, including two-object grammar (`put`/`give`/`tie`/`unlock`/...).
-- **A handful of resolved single-trigger puzzles**: pushing the rug reveals
-  the trap door; tying the rope to the railing opens the Torch Room descent;
-  turning the dam bolt with the wrench toggles the reservoir; unlocking the
-  grate with the skeleton key.
+- **~40 verbs**, including two-object grammar (`put`/`give`/`tie`/`unlock`/...).
 - **Real combat**, ported from `VILLAIN-BLOW`/`HERO-BLOW`'s actual strength
   tables and message tables — not a stub. The troll, thief, and cyclops are
   all fightable, with the cyclops's `STRENGTH 10000` making direct combat
@@ -172,17 +169,31 @@ puzzles set and exits/descriptions read.
   `V-SCORE`'s table. Collecting and depositing everything currently
   reachable sets `wonFlag`, unlocking the path from West of House to the
   Stone Barrow; walking in triggers the real ending text and ends the game.
+- **Nearly every named puzzle**, ported verbatim from `1actions.zil` where
+  a real mechanic exists to port: the trap door (push the rug), the Torch
+  Room descent (tie the rope to the railing), the grate (spot it from the
+  maze, unlock with the skeleton key), the dam/reservoir (turn the bolt
+  with the wrench, then the drained reservoir reveals the trunk), the
+  Hades exorcism (ring the bell, light the candles, read the book), the
+  coffin curse (pray at the altar), the rainbow (wave the sceptre, revealing
+  the pot of gold), the coal mine (dig for the scarab, run the coal
+  machine, the bat, the dumbwaiter basket), egg/canary fragility (breaking,
+  winding, the bauble payoff), the mirror rooms (rub to teleport), boating
+  the river (board/launch/land, drifting, puncturing), and light source
+  fuel timers (the lamp dims and burns out, candles burn down, matches
+  burn for two turns each).
 
 ## What's not (yet)
 
-Everything not listed above is either a `note` field on the relevant object
-in `zorkData.bxs` or a generic "nothing happens" response: lamp/match/candle
-fuel timers, the Hades exorcism, the dam's full multi-stage drain sequence,
-mirror-room teleportation, the coal mine puzzles, the rainbow/sceptre, and
-egg/canary fragility. A handful of treasures gated behind those puzzles
-(trunk, scarab, pot_of_gold, diamond, broken_egg, bauble, skull) aren't
-counted toward the win condition yet either — see [NOTES.md](NOTES.md) for
-specifics.
+What's left is small and tracked in detail in [NOTES.md](NOTES.md):
+- A `throw` verb doesn't exist, so nothing can ever produce `broken_lamp`
+  (a burned-out lamp just stays in place, permanently dead, instead).
+- A few ZIL-internal simplifications, called out in NOTES.md per puzzle —
+  e.g. the dam's full multi-stage `GATES-OPEN` transition and flooding
+  timer, `MIRROR-MUNG` (breaking a mirror), repairing a punctured boat
+  with putty.
+- This engine still has no darkness/visibility system at all; running out
+  of light is flavor-only and doesn't currently block anything.
 
 If you're picking this up: search for `TODO` and `note` in `zorkData.bxs` —
 every known gap is annotated in place rather than silently faked.
