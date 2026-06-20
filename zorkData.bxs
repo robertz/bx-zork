@@ -423,7 +423,7 @@ will provide many months of trouble-free operation.",
         "Lying half buried in the mud is an old trunk, bulging with jewels.", true,
         { "adjectives" : [ "old" ], "size" : 35, "value" : 15, "treasureValue" : 5,
           "location" : "reservoir", "hidden" : true,
-          "note" : "TODO: hidden until the reservoir is drained (lowTide); Task 6." }
+          "note" : "Revealed by the reservoir's onEnter once lowTide is true." }
     ),
 
     // --- Mirror rooms -----------------------------------------------------------
@@ -525,7 +525,7 @@ sceptre is ornamented with colored enamel, and tapers to a sharp point.",
         true,
         { "adjectives" : [ "sharp", "egyptian", "ancient", "enameled" ], "weapon" : true, "size" : 3,
           "value" : 4, "treasureValue" : 6, "location" : "coffin",
-          "note" : "TODO: waving it at the falls/rainbow should set rainbowFlag (Task 6)." }
+          "note" : "Waving it at the falls/rainbow toggles rainbowFlag (handleWave)." }
     ),
     "engravings" : makeObject(
         "engravings", "wall with engravings", [ "wall", "engravings", "inscription" ],
@@ -608,7 +608,7 @@ excised them.",
     "leak" : makeObject(
         "leak", "leak", [ "leak", "drip", "pipe" ], "", false,
         { "scenery" : true, "location" : "maintenance_room", "hidden" : true,
-          "note" : "TODO: appears once the dam puzzle is underway (Task 6)." }
+          "note" : "Revealed by pushing the blue button (handlePush)." }
     ),
     "guide" : makeObject(
         "guide", "tour guidebook", [ "guide", "book", "books", "guidebooks" ],
@@ -748,7 +748,7 @@ Warning:
         "At the end of the rainbow is a pot of gold.", true,
         { "adjectives" : [ "gold" ], "size" : 15, "value" : 10, "treasureValue" : 10,
           "location" : "end_of_rainbow", "hidden" : true,
-          "note" : "TODO: hidden until the rainbow is made solid (rainbowFlag, via the sceptre — Task 6)." }
+          "note" : "Revealed by waving the sceptre at end_of_rainbow (handleWave)." }
     ),
     "bracelet" : makeObject(
         "bracelet", "sapphire-encrusted bracelet", [ "bracelet", "jewel", "sapphire", "treasure" ],
@@ -1466,6 +1466,13 @@ mud pile. There are ""shores"" to the north and south." :
 "You are on the lake. Beaches can be seen north and south.
 Upstream a small stream enters the lake through a narrow cleft
 in the rocks. The dam can be seen downstream.",
+        // Mirrors the original's TRUNK-OF-JEWELS sitting buried in the mud:
+        // once the reservoir drains (lowTide), it's no longer underwater.
+        "onEnter" : () => {
+            if ( gameState.flags.lowTide ) {
+                objects.trunk.hidden = false;
+            }
+        },
         "exits" : {
             "north" : "reservoir_north",
             "south" : "reservoir_south",

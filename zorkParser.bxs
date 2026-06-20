@@ -408,8 +408,36 @@ function handleClimb(obj) {
     return handleGo( "up" );
 }
 
+// SCEPTRE-FUNCTION: waving the sceptre at the falls or the end of the
+// rainbow toggles rainbowFlag (making the rainbow solid/crossable, and the
+// pot of gold visible at the rainbow's end); waving it while standing on
+// the rainbow itself drops it out from under you.
 function handleWave(obj) {
-    return "Nothing happens.";
+    if ( obj.id != "sceptre" ) {
+        return "Nothing happens.";
+    }
+    if ( gameState.currentRoom == "aragain_falls" || gameState.currentRoom == "end_of_rainbow" ) {
+        if ( !gameState.flags.rainbowFlag ) {
+            gameState.flags.rainbowFlag = true;
+            var message = "Suddenly, the rainbow appears to become solid and, I venture," &
+                NEWLINE & "walkable (I think the giveaway was the stairs and bannister).";
+            if ( gameState.currentRoom == "end_of_rainbow" && objects.pot_of_gold.location == "end_of_rainbow" ) {
+                objects.pot_of_gold.hidden = false;
+                message &= NEWLINE & "A shimmering pot of gold appears at the end of the rainbow.";
+            }
+            return message;
+        }
+        gameState.flags.rainbowFlag = false;
+        return "The rainbow seems to have become somewhat run-of-the-mill.";
+    }
+    if ( gameState.currentRoom == "on_rainbow" ) {
+        gameState.flags.rainbowFlag = false;
+        return endGame(
+            "The structural integrity of the rainbow is severely compromised," &
+            NEWLINE & "leaving you hanging in midair, supported only by water vapor. Bye."
+        );
+    }
+    return "A dazzling display of color briefly emanates from the sceptre.";
 }
 
 function handleRing(obj) {
@@ -471,6 +499,24 @@ function handlePush(obj) {
         gameState.flags.rugMoved = true;
         objects.trap_door.hidden = false;
         return "With great effort, you move the rug to one side of the room, revealing a closed trap door.";
+    }
+    // BUTTON-F: the blue button bursts a pipe in the maintenance room,
+    // revealing the leak. The real water-level flooding timer
+    // (I-MAINT-ROOM) isn't modeled — that's a fuel/timer-system task.
+    if ( obj.id == "blue_button" ) {
+        if ( !objects.leak.hidden ) {
+            return "The blue button appears to be jammed.";
+        }
+        objects.leak.hidden = false;
+        return "There is a rumbling sound and a stream of water appears to burst" &
+            NEWLINE & "from the east wall of the room (apparently, a leak has occurred in a" &
+            NEWLINE & "pipe).";
+    }
+    if ( obj.id == "red_button" ) {
+        return "The lights within the room come on.";
+    }
+    if ( obj.id == "brown_button" || obj.id == "yellow_button" ) {
+        return "Click.";
     }
     return "Pushing the #obj.name# doesn't seem to accomplish anything.";
 }
