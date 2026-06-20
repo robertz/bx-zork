@@ -1,0 +1,2128 @@
+// Zork I content ported from the MIT-licensed ZIL source at
+// https://github.com/historicalsource/zork1 (1dungeon.zil, 1actions.zil).
+// Full room map and object set. Descriptions/synonyms/flags are taken
+// verbatim from the source; anything conditional on later game state or
+// tied to a puzzle that isn't implemented yet is noted via a `note` field
+// rather than silently dropped or invented (see project tasks for what's
+// tracked as separate follow-on work: verb grammar, combat, set-piece
+// puzzles, scoring/endgame).
+
+function makeObject(id, name, synonyms, desc, takeable, options = {}) {
+    return {
+        "id"          : id,
+        "name"        : name,
+        "synonyms"    : synonyms,
+        "adjectives"  : options.adjectives ?: [],
+        "desc"        : desc,
+        "takeable"    : takeable,
+        "scenery"     : options.scenery ?: false,
+        "container"   : options.container ?: false,
+        "open"        : options.open ?: false,
+        "openable"    : options.openable ?: false,
+        "openMessage" : options.openMessage ?: "",
+        "closeMessage": options.closeMessage ?: "",
+        "noOpenMessage": options.noOpenMessage ?: "",
+        "transparent" : options.transparent ?: false,
+        "capacity"    : options.capacity ?: 0,
+        "door"        : options.door ?: false,
+        "light"       : options.light ?: false,
+        // Current lit/burning state (ZIL's ONBIT) for light/flame sources —
+        // distinct from `open`, which is about containers/doors.
+        "on"          : options.on ?: false,
+        "readable"    : options.readable ?: false,
+        "text"        : options.text ?: "",
+        "noTakeMessage": options.noTakeMessage ?: "",
+        "globalIn"    : options.globalIn ?: [],
+        "location"    : options.location ?: "",
+        // ZIL's INVISIBLE flag: a real placement that isn't in scope yet
+        // because its reveal trigger (a puzzle from the task list) isn't
+        // wired up. Always paired with a `note` saying what should clear it.
+        "hidden"      : options.hidden ?: false,
+        "weapon"      : options.weapon ?: false,
+        "tool"        : options.tool ?: false,
+        "food"        : options.food ?: false,
+        "burnable"    : options.burnable ?: false,
+        "actor"       : options.actor ?: false,
+        "strength"    : options.strength ?: 0,
+        "value"       : options.value ?: 0,
+        "treasureValue" : options.treasureValue ?: 0,
+        "size"        : options.size ?: 0,
+        "climbable"   : options.climbable ?: false,
+        "drinkable"   : options.drinkable ?: false,
+        "locked"      : options.locked ?: false,
+        "unlocksWith" : options.unlocksWith ?: "",
+        "note"        : options.note ?: ""
+    };
+}
+
+objects = {
+
+    // --- Generic scenery vocabulary (ZIL LOCAL-GLOBALS / GLOBAL-OBJECTS) ---
+    // These exist mostly so the parser recognizes the words at all; their
+    // flavor text in 1actions.zil is mostly ambient/joke responses that
+    // aren't ported (not central to any room or puzzle).
+
+    "board" : makeObject(
+        "board", "board", [ "boards", "board" ], "", false,
+        { "scenery" : true, "noTakeMessage" : "The boards are securely fastened.",
+          "globalIn" : [ "west_of_house", "north_of_house", "south_of_house" ] }
+    ),
+    "teeth" : makeObject(
+        "teeth", "set of teeth", [ "overboard", "teeth" ], "", false,
+        { "scenery" : true, "location" : "", "note" : "ZIL GLOBAL-OBJECTS joke object (river 'overboard' reference); not wired to a room." }
+    ),
+    "wall" : makeObject(
+        "wall", "surrounding wall", [ "wall", "walls" ], "", false,
+        { "adjectives" : [ "surrounding" ], "scenery" : true, "location" : "",
+          "note" : "ZIL GLOBAL-OBJECTS generic scenery; not wired to a room." }
+    ),
+    "granite_wall" : makeObject(
+        "granite_wall", "granite wall", [ "wall" ], "", false,
+        { "adjectives" : [ "granite" ], "scenery" : true, "location" : "",
+          "note" : "ZIL GLOBAL-OBJECTS generic scenery; not wired to a room." }
+    ),
+    "songbird" : makeObject(
+        "songbird", "songbird", [ "bird", "songbird" ], "", false,
+        { "adjectives" : [ "song" ], "scenery" : true,
+          "globalIn" : [ "forest_1", "forest_2", "forest_3", "path", "up_a_tree" ] }
+    ),
+    "white_house" : makeObject(
+        "white_house", "white house", [ "house" ], "", false,
+        { "adjectives" : [ "white", "beautiful", "colonial" ], "scenery" : true,
+          "globalIn" : [ "west_of_house", "north_of_house", "south_of_house", "behind_house" ] }
+    ),
+    "forest" : makeObject(
+        "forest", "forest", [ "forest", "trees", "pines", "hemlocks" ], "", false,
+        { "scenery" : true,
+          "globalIn" : [ "west_of_house", "north_of_house", "south_of_house", "behind_house",
+                         "forest_1", "forest_2", "forest_3", "path", "clearing", "up_a_tree" ] }
+    ),
+    "tree" : makeObject(
+        "tree", "tree", [ "tree", "branch" ], "", false,
+        { "adjectives" : [ "large", "storm" ], "scenery" : true, "climbable" : true,
+          "globalIn" : [ "forest_1", "forest_2", "forest_3", "path", "up_a_tree", "mountains" ] }
+    ),
+    "mountain_range" : makeObject(
+        "mountain_range", "mountain range", [ "mountain", "range" ], "", false,
+        { "adjectives" : [ "impassable", "flathead" ], "scenery" : true, "location" : "mountains" }
+    ),
+    "global_water" : makeObject(
+        "global_water", "water", [ "water", "quantity" ], "", false,
+        { "scenery" : true, "drinkable" : true,
+          "globalIn" : [ "reservoir_south", "reservoir", "reservoir_north", "stream_view", "in_stream",
+                         "dam_room", "dam_base", "river_1", "river_2", "river_3", "white_cliffs_north",
+                         "white_cliffs_south", "river_4", "river_5", "shore", "sandy_beach",
+                         "aragain_falls", "end_of_rainbow", "canyon_bottom" ] }
+    ),
+    "water" : makeObject(
+        "water", "quantity of water", [ "water", "quantity", "liquid", "h2o" ], "", true,
+        { "drinkable" : true, "location" : "bottle", "size" : 4 }
+    ),
+    "chimney" : makeObject(
+        "chimney", "chimney", [ "chimney" ], "", false,
+        { "adjectives" : [ "dark", "narrow" ], "scenery" : true, "globalIn" : [ "kitchen", "studio" ] }
+    ),
+    "boarded_window" : makeObject(
+        "boarded_window", "boarded window", [ "window" ], "", false,
+        { "adjectives" : [ "boarded" ], "scenery" : true,
+          "globalIn" : [ "north_of_house", "south_of_house" ] }
+    ),
+    "crack" : makeObject(
+        "crack", "crack", [ "crack" ], "", false,
+        { "adjectives" : [ "narrow" ], "scenery" : true, "globalIn" : [ "damp_cave", "chasm_room" ] }
+    ),
+    "slide" : makeObject(
+        "slide", "chute", [ "chute", "ramp", "slide" ], "", false,
+        { "adjectives" : [ "steep", "metal", "twisting" ], "scenery" : true, "climbable" : true, "globalIn" : [ "slide_room" ] }
+    ),
+    "ladder" : makeObject(
+        "ladder", "wooden ladder", [ "ladder" ], "", false,
+        { "adjectives" : [ "wooden", "rickety", "narrow" ], "scenery" : true, "climbable" : true,
+          "globalIn" : [ "ladder_top", "ladder_bottom" ] }
+    ),
+    "climbable_cliff" : makeObject(
+        "climbable_cliff", "cliff", [ "wall", "cliff", "walls", "ledge" ], "", false,
+        { "adjectives" : [ "rocky", "sheer" ], "scenery" : true, "climbable" : true,
+          "globalIn" : [ "canyon_bottom", "cliff_middle", "canyon_view" ] }
+    ),
+    "white_cliff" : makeObject(
+        "white_cliff", "white cliffs", [ "cliff", "cliffs" ], "", false,
+        { "adjectives" : [ "white" ], "scenery" : true,
+          "globalIn" : [ "white_cliffs_north", "white_cliffs_south" ] }
+    ),
+    "rainbow" : makeObject(
+        "rainbow", "rainbow", [ "rainbow" ], "", false,
+        { "scenery" : true, "climbable" : true, "globalIn" : [ "aragain_falls", "on_rainbow", "end_of_rainbow", "canyon_view" ],
+          "note" : "ACTION RAINBOW-FCN (cross/through when solid) — not wired up (Task 6)." }
+    ),
+    "river" : makeObject(
+        "river", "river", [ "river" ], "", false,
+        { "adjectives" : [ "frigid" ], "scenery" : true,
+          "globalIn" : [ "dam_base", "river_1", "river_2", "river_3", "white_cliffs_north", "white_cliffs_south",
+                         "river_4", "river_5", "shore", "sandy_beach", "aragain_falls", "end_of_rainbow",
+                         "canyon_bottom", "cliff_middle", "canyon_view" ] }
+    ),
+    "bodies" : makeObject(
+        "bodies", "pile of bodies", [ "bodies", "body", "remains", "pile" ], "", false,
+        { "adjectives" : [ "mangled" ], "scenery" : true,
+          "globalIn" : [ "entrance_to_hades", "land_of_living_dead" ] }
+    ),
+
+    // --- West of House and surrounding forest -----------------------------
+
+    "mailbox" : makeObject(
+        "mailbox", "small mailbox", [ "mailbox", "box" ], "", false,
+        {
+            "adjectives" : [ "small" ], "container" : true, "openable" : true, "open" : false,
+            "capacity" : 10, "noTakeMessage" : "It is securely anchored.", "location" : "west_of_house"
+        }
+    ),
+    "leaflet" : makeObject(
+        "leaflet", "leaflet", [ "leaflet", "advertisement", "booklet", "mail" ],
+        "A small leaflet is on the ground.", true,
+        {
+            "adjectives" : [ "small" ], "readable" : true, "size" : 2,
+            "text" :
+"""WELCOME TO ZORK!
+
+ZORK is a game of adventure, danger, and low cunning. In it you
+will explore some of the most amazing territory ever seen by mortals.
+No computer should be without one!""",
+            "location" : "mailbox"
+        }
+    ),
+    // FLAGS DOORBIT NDESCBIT; (VERB? OPEN) always refuses in FRONT-DOOR-FCN.
+    "front_door" : makeObject(
+        "front_door", "front door", [ "door" ], "", false,
+        {
+            "adjectives" : [ "front", "boarded" ], "scenery" : true, "door" : true,
+            "openable" : false, "noOpenMessage" : "The door cannot be opened.", "location" : "west_of_house"
+        }
+    ),
+
+    // --- The house, inside and out -----------------------------------------
+
+    // FLAGS DOORBIT NDESCBIT. Visible/operable from both sides of the house
+    // (ZIL keeps it IN LOCAL-GLOBALS and lists it in each room's GLOBAL set).
+    "kitchen_window" : makeObject(
+        "kitchen_window", "kitchen window", [ "window" ], "", false,
+        {
+            "adjectives" : [ "kitchen", "small" ], "scenery" : true, "door" : true, "openable" : true, "open" : false,
+            "openMessage" : "With great effort, you open the window far enough to allow entry.",
+            "closeMessage" : "The window closes (more easily than it opened).",
+            "location" : "behind_house", "globalIn" : [ "behind_house", "kitchen" ]
+        }
+    ),
+    "kitchen_table" : makeObject(
+        "kitchen_table", "kitchen table", [ "table" ], "", false,
+        { "adjectives" : [ "kitchen" ], "scenery" : true, "container" : true, "open" : true,
+          "openable" : true, "capacity" : 50, "location" : "kitchen" }
+    ),
+    "sandwich_bag" : makeObject(
+        "sandwich_bag", "brown sack", [ "bag", "sack" ],
+        "On the table is an elongated brown sack, smelling of hot peppers.", true,
+        { "adjectives" : [ "brown", "elongated", "smelly" ], "container" : true, "open" : true,
+          "openable" : true, "burnable" : true, "capacity" : 9, "size" : 9, "location" : "kitchen_table" }
+    ),
+    "lunch" : makeObject(
+        "lunch", "lunch", [ "food", "sandwich", "lunch", "dinner" ],
+        "A hot pepper sandwich is here.", true,
+        { "adjectives" : [ "hot", "pepper" ], "food" : true, "location" : "sandwich_bag" }
+    ),
+    "garlic" : makeObject(
+        "garlic", "clove of garlic", [ "garlic", "clove" ], "", true,
+        { "food" : true, "size" : 4, "location" : "sandwich_bag" }
+    ),
+    "bottle" : makeObject(
+        "bottle", "glass bottle", [ "bottle", "container" ],
+        "A bottle is sitting on the table.", true,
+        { "adjectives" : [ "clear", "glass" ], "container" : true, "transparent" : true,
+          "capacity" : 4, "location" : "kitchen_table" }
+    ),
+    "attic_table" : makeObject(
+        "attic_table", "table", [ "table" ], "", false,
+        { "scenery" : true, "container" : true, "open" : true, "openable" : true, "capacity" : 40, "location" : "attic" }
+    ),
+    // Correction from the opening-slice port: this nasty knife (not the
+    // rusty one in the maze) is genuinely IN ATTIC-TABLE and reachable from
+    // the start — the earlier slice mistakenly said no knife was reachable.
+    "knife" : makeObject(
+        "knife", "nasty knife", [ "knives", "knife", "blade" ],
+        "On a table is a nasty-looking knife.", true,
+        { "adjectives" : [ "nasty", "unrusty" ], "weapon" : true, "location" : "attic_table" }
+    ),
+    "rope" : makeObject(
+        "rope", "rope", [ "rope", "hemp", "coil" ],
+        "A large coil of rope is lying in the corner.", true,
+        { "adjectives" : [ "large" ], "location" : "attic" }
+    ),
+    "brass_lantern" : makeObject(
+        "brass_lantern", "brass lantern", [ "lamp", "lantern", "light" ],
+        "A battery-powered brass lantern is on the trophy case.", true,
+        { "adjectives" : [ "brass" ], "light" : true, "location" : "living_room" }
+    ),
+    "sword" : makeObject(
+        "sword", "sword", [ "sword", "orcrist", "glamdring", "blade" ],
+        "Above the trophy case hangs an elvish sword of great antiquity.", true,
+        { "adjectives" : [ "elvish", "old", "antique" ], "weapon" : true, "location" : "living_room" }
+    ),
+    // FLAGS TRANSBIT CONTBIT NDESCBIT TRYTAKEBIT SEARCHBIT — transparent,
+    // bolted to the wall, not auto-listed (its mention is baked into the
+    // living room's own description text).
+    "trophy_case" : makeObject(
+        "trophy_case", "trophy case", [ "case" ], "", false,
+        {
+            "adjectives" : [ "trophy" ], "scenery" : true, "container" : true, "openable" : true, "open" : false,
+            "transparent" : true, "capacity" : 10000,
+            "noTakeMessage" : "The trophy case is securely fastened to the wall.", "location" : "living_room"
+        }
+    ),
+    "rug" : makeObject(
+        "rug", "carpet", [ "rug", "carpet" ], "", false,
+        { "adjectives" : [ "large", "oriental" ], "scenery" : true,
+          "noTakeMessage" : "The rug is too heavy to lift.", "location" : "living_room" }
+    ),
+    "wooden_door" : makeObject(
+        "wooden_door", "wooden door", [ "door", "lettering", "writing" ],
+        "", false,
+        { "adjectives" : [ "wooden", "gothic", "strange", "west" ], "scenery" : true, "transparent" : true,
+          "readable" : true, "text" : "The engravings translate to ""This space intentionally left blank.""",
+          "location" : "living_room" }
+    ),
+    // FLAGS DOORBIT NDESCBIT INVISIBLE — invisible until the oriental rug is
+    // moved (RUG-MOVED). Real location is LIVING-ROOM; left hidden because
+    // moving the rug isn't implemented yet (Task 6).
+    "trap_door" : makeObject(
+        "trap_door", "trap door", [ "door", "trapdoor", "cover" ], "", false,
+        {
+            "adjectives" : [ "trap", "dusty" ], "scenery" : true, "door" : true, "openable" : true, "open" : false,
+            "location" : "living_room", "hidden" : true,
+            "note" : "Revealed by pushing/moving the rug (handlePush); see Cellar exit's requiresOpen.",
+            "openMessage" : "The door reluctantly opens to reveal a rickety staircase descending into darkness.",
+            "closeMessage" : "The door swings shut and closes."
+        }
+    ),
+
+    // --- Cellar, Troll Room, Gallery, Studio --------------------------------
+
+    "bell" : makeObject(
+        "bell", "brass bell", [ "bell" ], "", true,
+        { "adjectives" : [ "small", "brass" ], "location" : "north_temple" }
+    ),
+    "hot_bell" : makeObject(
+        "hot_bell", "red hot brass bell", [ "bell" ],
+        "On the ground is a red hot bell.", false,
+        { "adjectives" : [ "brass", "hot", "red", "small" ], "location" : "",
+          "note" : "TODO: alternate state of `bell` after being held over the torch; state-swap not implemented." }
+    ),
+    "troll" : makeObject(
+        "troll", "troll", [ "troll" ],
+        "A nasty-looking troll, brandishing a bloody axe, blocks all passages
+out of the room.",
+        false,
+        { "adjectives" : [ "nasty" ], "actor" : true, "strength" : 2, "location" : "troll_room",
+          "note" : "TODO: combat not implemented (Task 5); trollFlag never flips, so the troll never yields." }
+    ),
+    "axe" : makeObject(
+        "axe", "bloody axe", [ "axe", "ax" ], "", true,
+        { "adjectives" : [ "bloody" ], "weapon" : true, "size" : 25, "location" : "troll_room", "hidden" : true,
+          "note" : "Held by the troll until he's defeated (Task 5); not on the ground yet." }
+    ),
+    "painting" : makeObject(
+        "painting", "painting", [ "painting", "art", "canvas", "treasure" ],
+        "A painting by a neglected genius is here.", true,
+        { "adjectives" : [ "beautiful" ], "burnable" : true, "size" : 15, "value" : 4, "treasureValue" : 6,
+          "location" : "gallery" }
+    ),
+    "owners_manual" : makeObject(
+        "owners_manual", "ZORK owner's manual", [ "manual", "piece", "paper" ],
+        "Loosely attached to a wall is a small piece of paper.", true,
+        {
+            "adjectives" : [ "zork", "owners", "small" ], "readable" : true,
+            "text" :
+"Congratulations!
+
+You are the privileged owner of ZORK I: The Great Underground Empire,
+a self-contained and self-maintaining universe. If used and maintained
+in accordance with normal operating practices for small universes, ZORK
+will provide many months of trouble-free operation.",
+            "location" : "studio"
+        }
+    ),
+
+    // --- Maze of twisty little passages -------------------------------------
+
+    "bones" : makeObject(
+        "bones", "skeleton", [ "bones", "skeleton", "body" ], "", false,
+        { "scenery" : true, "noTakeMessage" : "A ghost appears and is appalled at your desecration.",
+          "location" : "maze_5" }
+    ),
+    "burned_out_lantern" : makeObject(
+        "burned_out_lantern", "burned-out lantern", [ "lantern", "lamp" ],
+        "The deceased adventurer's useless lantern is here.", true,
+        { "adjectives" : [ "rusty", "burned", "dead", "useless" ], "size" : 20, "location" : "maze_5" }
+    ),
+    "bag_of_coins" : makeObject(
+        "bag_of_coins", "leather bag of coins", [ "bag", "coins", "treasure" ],
+        "An old leather bag, bulging with coins, is here.", true,
+        { "adjectives" : [ "old", "leather" ], "size" : 15, "value" : 10, "treasureValue" : 5, "location" : "maze_5" }
+    ),
+    "keys" : makeObject(
+        "keys", "skeleton key", [ "key" ], "", true,
+        { "adjectives" : [ "skeleton" ], "tool" : true, "size" : 10, "location" : "maze_5" }
+    ),
+    // Real source location is MAZE-5, genuinely reachable (not gated by any
+    // flag) — distinct from the `knife` on the attic table.
+    "rusty_knife" : makeObject(
+        "rusty_knife", "rusty knife", [ "knives", "knife" ],
+        "Beside the skeleton is a rusty knife.", true,
+        { "adjectives" : [ "rusty" ], "weapon" : true, "tool" : true, "size" : 20, "location" : "maze_5" }
+    ),
+    "grate" : makeObject(
+        "grate", "grating", [ "grate", "grating" ], "", false,
+        {
+            "door" : true, "openable" : true, "open" : false, "locked" : true, "unlocksWith" : "keys",
+            "hidden" : true, "globalIn" : [ "grating_clearing", "grating_room" ],
+            "note" : "Hidden until spotted from Grating Room below (onEnter clears `hidden`); unlock with the skeleton key, then open."
+        }
+    ),
+
+    // --- Cyclops, hideaway, treasure room ------------------------------------
+
+    "cyclops" : makeObject(
+        "cyclops", "cyclops", [ "cyclops", "monster", "eye" ], "", false,
+        { "adjectives" : [ "hungry", "giant" ], "scenery" : true, "actor" : true, "strength" : 10000,
+          "location" : "cyclops_room",
+          "note" : "TODO: feeding/scaring it off (Task 5/6) isn't implemented; cyclopsFlag/magicFlag never flip." }
+    ),
+    "large_bag" : makeObject(
+        "large_bag", "large bag", [ "bag" ], "", false,
+        { "adjectives" : [ "large", "thiefs" ], "scenery" : true, "location" : "thief",
+          "note" : "Carried by the thief; only reachable once he's defeated (Task 5)." }
+    ),
+    "stiletto" : makeObject(
+        "stiletto", "stiletto", [ "stiletto" ], "", true,
+        { "adjectives" : [ "vicious" ], "weapon" : true, "size" : 10, "location" : "thief",
+          "note" : "Carried by the thief; only reachable once he's defeated (Task 5)." }
+    ),
+    "chalice" : makeObject(
+        "chalice", "chalice", [ "chalice", "cup", "silver", "treasure" ],
+        "There is a silver chalice, intricately engraved, here.", true,
+        { "adjectives" : [ "silver", "engravings" ], "container" : true, "capacity" : 5, "size" : 10,
+          "value" : 10, "treasureValue" : 5, "location" : "treasure_room" }
+    ),
+
+    // --- Reservoir area -------------------------------------------------------
+
+    "pump" : makeObject(
+        "pump", "hand-held air pump", [ "pump", "air-pump", "tool", "tools" ], "", true,
+        { "adjectives" : [ "small", "hand-held" ], "tool" : true, "location" : "reservoir_north" }
+    ),
+    "trunk" : makeObject(
+        "trunk", "trunk of jewels", [ "trunk", "chest", "jewels", "treasure" ],
+        "Lying half buried in the mud is an old trunk, bulging with jewels.", true,
+        { "adjectives" : [ "old" ], "size" : 35, "value" : 15, "treasureValue" : 5,
+          "location" : "reservoir", "hidden" : true,
+          "note" : "TODO: hidden until the reservoir is drained (lowTide); Task 6." }
+    ),
+
+    // --- Mirror rooms -----------------------------------------------------------
+
+    "mirror_1" : makeObject(
+        "mirror_1", "mirror", [ "reflection", "mirror", "enormous" ], "", false,
+        { "scenery" : true, "noTakeMessage" : "The mirror is many times your size. Give up.", "location" : "mirror_room_1",
+          "note" : "TODO: rubbing it should teleport you to the other mirror room (Task 6)." }
+    ),
+    "mirror_2" : makeObject(
+        "mirror_2", "mirror", [ "reflection", "mirror", "enormous" ], "", false,
+        { "scenery" : true, "noTakeMessage" : "The mirror is many times your size. Give up.", "location" : "mirror_room_2",
+          "note" : "TODO: rubbing it should teleport you to the other mirror room (Task 6)." }
+    ),
+
+    // --- Round Room and vicinity --------------------------------------------
+
+    "thief" : makeObject(
+        "thief", "thief", [ "thief", "robber", "man", "person" ],
+        "There is a suspicious-looking individual, holding a large bag, leaning
+against one wall. He is armed with a deadly stiletto.",
+        false,
+        { "adjectives" : [ "shady", "suspicious", "seedy" ], "actor" : true, "strength" : 5,
+          "container" : true, "open" : true, "location" : "round_room", "hidden" : true,
+          "note" : "TODO: random movement, theft, and combat are not implemented (Task 5)." }
+    ),
+    "bar" : makeObject(
+        "bar", "platinum bar", [ "bar", "platinum", "treasure" ],
+        "On the ground is a large platinum bar.", true,
+        { "adjectives" : [ "platinum", "large" ], "size" : 20, "value" : 10, "treasureValue" : 5, "location" : "loud_room" }
+    ),
+
+    // --- Hades ---------------------------------------------------------------
+
+    "ghosts" : makeObject(
+        "ghosts", "number of ghosts", [ "ghosts", "spirits", "fiends", "force" ], "", false,
+        { "adjectives" : [ "invisible", "evil" ], "scenery" : true, "actor" : true, "location" : "entrance_to_hades",
+          "note" : "TODO: EXORCISE ceremony (bell/book/candles) not implemented (Task 6); lldFlag never flips." }
+    ),
+    "skull" : makeObject(
+        "skull", "crystal skull", [ "skull", "head", "treasure" ],
+        "Lying in one corner of the room is a beautifully carved crystal skull.
+It appears to be grinning at you rather nastily.", true,
+        { "adjectives" : [ "crystal" ], "value" : 10, "treasureValue" : 10, "location" : "land_of_living_dead" }
+    ),
+
+    // --- Dome, Temple, Egypt --------------------------------------------------
+
+    "railing" : makeObject(
+        "railing", "wooden railing", [ "railing", "rail" ], "", false,
+        { "adjectives" : [ "wooden" ], "scenery" : true, "location" : "dome_room" }
+    ),
+    "altar" : makeObject(
+        "altar", "altar", [ "altar" ], "", false,
+        { "scenery" : true, "container" : true, "open" : true, "openable" : true, "capacity" : 50, "location" : "south_temple" }
+    ),
+    "book" : makeObject(
+        "book", "black book", [ "book", "prayer", "page", "books" ],
+        "On the altar is a large black book, open to page 569.", true,
+        {
+            "adjectives" : [ "large", "black" ], "readable" : true, "container" : true, "burnable" : true, "size" : 10,
+            "text" :
+"Commandment ##12592
+
+Oh ye who go about saying unto each: ""Hello sailor"":
+Dost thou know the magnitude of thy sin before the gods?
+Yea, verily, thou shalt be ground between two stones.
+Shall the angry gods cast thy body into the whirlpool?
+Surely, thy eye shall be put out with a sharp stick!
+Even unto the ends of the earth shalt thou wander and
+Unto the land of the dead shalt thou be sent at last.
+Surely thou shalt repent of thy cunning.",
+            "location" : "altar"
+        }
+    ),
+    "prayer" : makeObject(
+        "prayer", "prayer", [ "prayer", "inscription" ], "", false,
+        {
+            "adjectives" : [ "ancient", "old" ], "scenery" : true, "readable" : true,
+            "text" :
+"The prayer is inscribed in an ancient script, rarely used today. It seems
+to be a philippic against small insects, absent-mindedness, and the picking
+up and dropping of small objects. The final verse consigns trespassers to
+the land of the dead. All evidence indicates that the beliefs of the ancient
+Zorkers were obscure.",
+            "location" : "north_temple"
+        }
+    ),
+    "coffin" : makeObject(
+        "coffin", "gold coffin", [ "coffin", "casket", "treasure" ],
+        "The solid-gold coffin used for the burial of Ramses II is here.", true,
+        { "adjectives" : [ "solid", "gold" ], "container" : true, "capacity" : 35, "size" : 55,
+          "value" : 10, "treasureValue" : 15, "location" : "egypt_room" }
+    ),
+    "sceptre" : makeObject(
+        "sceptre", "sceptre", [ "sceptre", "scepter", "treasure" ],
+        "A sceptre, possibly that of ancient Egypt itself, is in the coffin. The
+sceptre is ornamented with colored enamel, and tapers to a sharp point.",
+        true,
+        { "adjectives" : [ "sharp", "egyptian", "ancient", "enameled" ], "weapon" : true, "size" : 3,
+          "value" : 4, "treasureValue" : 6, "location" : "coffin",
+          "note" : "TODO: waving it at the falls/rainbow should set rainbowFlag (Task 6)." }
+    ),
+    "engravings" : makeObject(
+        "engravings", "wall with engravings", [ "wall", "engravings", "inscription" ],
+        "There are old engravings on the walls here.", false,
+        {
+            "adjectives" : [ "old", "ancient" ], "scenery" : true, "readable" : true,
+            "text" :
+"The engravings were incised in the living rock of the cave wall by
+an unknown hand. They depict, in symbolic form, the beliefs of the
+ancient Zorkers. Skillfully interwoven with the bas reliefs are excerpts
+illustrating the major religious tenets of that time. Unfortunately, a
+later age seems to have considered them blasphemous and just as skillfully
+excised them.",
+            "location" : "engravings_cave"
+        }
+    ),
+
+    // --- Flood Control Dam ##3 --------------------------------------------------
+
+    "dam" : makeObject(
+        "dam", "dam", [ "dam", "gate", "gates" ], "", false,
+        { "scenery" : true, "location" : "dam_room",
+          "note" : """turn bolt with wrench"" toggles lowTide directly (handleTurn); the real GATES-OPEN transitional state and gate-flag bubble aren't modeled (Task 6)." }
+    ),
+    "bolt" : makeObject(
+        "bolt", "bolt", [ "bolt", "nut" ], "", false,
+        { "adjectives" : [ "metal", "large" ], "scenery" : true, "location" : "dam_room" }
+    ),
+    "bubble" : makeObject(
+        "bubble", "green bubble", [ "bubble" ], "", false,
+        { "adjectives" : [ "small", "green", "plastic" ], "scenery" : true, "location" : "dam_room" }
+    ),
+    "control_panel" : makeObject(
+        "control_panel", "control panel", [ "panel" ], "", false,
+        { "adjectives" : [ "control" ], "scenery" : true, "location" : "dam_room" }
+    ),
+    "tool_chest" : makeObject(
+        "tool_chest", "group of tool chests", [ "chest", "chests", "group", "toolchests" ], "", false,
+        { "adjectives" : [ "tool" ], "scenery" : true, "container" : true, "open" : true, "openable" : true,
+          "location" : "maintenance_room" }
+    ),
+    "yellow_button" : makeObject(
+        "yellow_button", "yellow button", [ "button", "switch" ], "", false,
+        { "adjectives" : [ "yellow" ], "scenery" : true, "location" : "maintenance_room" }
+    ),
+    "brown_button" : makeObject(
+        "brown_button", "brown button", [ "button", "switch" ], "", false,
+        { "adjectives" : [ "brown" ], "scenery" : true, "location" : "maintenance_room" }
+    ),
+    "red_button" : makeObject(
+        "red_button", "red button", [ "button", "switch" ], "", false,
+        { "adjectives" : [ "red" ], "scenery" : true, "location" : "maintenance_room" }
+    ),
+    "blue_button" : makeObject(
+        "blue_button", "blue button", [ "button", "switch" ], "", false,
+        { "adjectives" : [ "blue" ], "scenery" : true, "location" : "maintenance_room" }
+    ),
+    "screwdriver" : makeObject(
+        "screwdriver", "screwdriver", [ "screwdriver", "tool", "tools", "driver" ], "", true,
+        { "adjectives" : [ "screw" ], "tool" : true, "location" : "maintenance_room" }
+    ),
+    "wrench" : makeObject(
+        "wrench", "wrench", [ "wrench", "tool", "tools" ], "", true,
+        { "tool" : true, "size" : 10, "location" : "maintenance_room" }
+    ),
+    "tube" : makeObject(
+        "tube", "tube", [ "tube", "tooth", "paste" ],
+        "There is an object which looks like a tube of toothpaste here.", true,
+        {
+            "container" : true, "readable" : true, "capacity" : 7, "size" : 5,
+            "text" : "---> Frobozz Magic Gunk Company <---
+      All-Purpose Gunk",
+            "location" : "maintenance_room"
+        }
+    ),
+    "putty" : makeObject(
+        "putty", "viscous material", [ "material", "gunk" ], "", true,
+        { "adjectives" : [ "viscous" ], "tool" : true, "size" : 6, "location" : "tube" }
+    ),
+    "leak" : makeObject(
+        "leak", "leak", [ "leak", "drip", "pipe" ], "", false,
+        { "scenery" : true, "location" : "maintenance_room", "hidden" : true,
+          "note" : "TODO: appears once the dam puzzle is underway (Task 6)." }
+    ),
+    "guide" : makeObject(
+        "guide", "tour guidebook", [ "guide", "book", "books", "guidebooks" ],
+        "Some guidebooks entitled ""Flood Control Dam ##3"" are on the reception
+desk.", true,
+        {
+            "adjectives" : [ "tour", "guide" ], "readable" : true,
+            "text" :
+"""	Flood Control Dam ##3
+
+FCD##3 was constructed in year 783 of the Great Underground Empire to
+harness the mighty Frigid River. This work was supported by a grant of
+37 million zorkmids from your omnipotent local tyrant Lord Dimwit
+Flathead the Excessive. This impressive structure is composed of
+370,000 cubic feet of concrete, is 256 feet tall at the center, and 193
+feet wide at the top. The lake created behind the dam has a volume
+of 1.7 billion cubic feet, an area of 12 million square feet, and a
+shore line of 36 thousand feet.
+
+The construction of FCD##3 took 112 days from ground breaking to
+the dedication. It required a work force of 384 slaves, 34 slave
+drivers, 12 engineers, 2 turtle doves, and a partridge in a pear
+tree. The work was managed by a command team composed of 2345
+bureaucrats, 2347 secretaries (at least two of whom could type),
+12,256 paper shufflers, 52,469 rubber stampers, 245,193 red tape
+processors, and nearly one million dead trees.
+
+We will now point out some of the more interesting features
+of FCD##3 as we conduct you on a guided tour of the facilities:
+
+        1) You start your tour here in the Dam Lobby. You will notice
+on your right that....",
+            "location" : "dam_lobby"
+        }
+    ),
+    "match" : makeObject(
+        "match", "matchbook", [ "match", "matches", "matchbook" ],
+        "There is a matchbook whose cover says ""Visit Beautiful FCD##3"" here.", true,
+        {
+            "adjectives" : [ "match" ], "readable" : true, "burnable" : true, "size" : 2,
+            "text" :
+"
+(Close cover before striking)
+
+YOU too can make BIG MONEY in the exciting field of PAPER SHUFFLING!
+
+Mr. Anderson of Muddle, Mass. says: ""Before I took this course I
+was a lowly bit twiddler. Now with what I learned at GUE Tech
+I feel really important and can obfuscate and confuse with the best.""
+
+Dr. Blank had this to say: ""Ten short days ago all I could look
+forward to was a dead-end job as a doctor. Now I have a promising
+future and make really big Zorkmids.""
+
+GUE Tech can't promise these fantastic results to everyone. But when
+you earn your degree from GUE Tech, your future will be brighter.",
+            "location" : "dam_lobby"
+        }
+    ),
+
+    // --- River area -------------------------------------------------------------
+
+    // Three ZIL states of the same conceptual boat (folded / inflated /
+    // punctured); the pump/inflate/puncture transitions aren't implemented
+    // (Task 6), so all three are ported as static objects in their default
+    // starting spots/states rather than one dynamic object.
+    "inflatable_boat" : makeObject(
+        "inflatable_boat", "pile of plastic", [ "boat", "pile", "plastic", "valve" ],
+        "There is a folded pile of plastic here which has a small valve
+attached.", true,
+        { "adjectives" : [ "plastic", "inflatable" ], "burnable" : true, "size" : 20, "location" : "dam_base" }
+    ),
+    "inflated_boat" : makeObject(
+        "inflated_boat", "magic boat", [ "boat", "raft" ], "", true,
+        { "adjectives" : [ "inflatable", "magic", "plastic", "seaworthy" ], "burnable" : true,
+          "container" : true, "open" : true, "capacity" : 100, "size" : 20, "location" : "",
+          "note" : "Created by ""inflate boat with pump"" (handleInflate); actually sailing it on river rooms isn't implemented (Task 6)." }
+    ),
+    "punctured_boat" : makeObject(
+        "punctured_boat", "punctured boat", [ "boat", "pile", "plastic" ], "", true,
+        { "adjectives" : [ "plastic", "punctured", "large" ], "burnable" : true, "size" : 20, "location" : "",
+          "note" : "TODO: created when the inflated boat is punctured (e.g. by the white cliffs' rocks); not implemented (Task 6)." }
+    ),
+    "boat_label" : makeObject(
+        "boat_label", "tan label", [ "label", "fineprint", "print" ],
+        "", true,
+        {
+            "adjectives" : [ "tan", "fine" ], "readable" : true, "burnable" : true, "size" : 2,
+            "text" :
+"  !!!!FROBOZZ MAGIC BOAT COMPANY!!!!
+
+Hello, Sailor!
+
+Instructions for use:
+
+   To get into a body of water, say ""Launch"".
+   To get to shore, say ""Land"" or the direction in which you want
+to maneuver the boat.
+
+Warranty:
+
+  This boat is guaranteed against all defects for a period of 76
+milliseconds from date of purchase or until first used, whichever comes first.
+
+Warning:
+   This boat is made of thin plastic.
+   Good Luck!",
+            "location" : "inflated_boat"
+        }
+    ),
+    "buoy" : makeObject(
+        "buoy", "red buoy", [ "buoy" ],
+        "There is a red buoy here (probably a warning).", true,
+        { "adjectives" : [ "red" ], "container" : true, "capacity" : 20, "size" : 10, "location" : "river_4" }
+    ),
+    "emerald" : makeObject(
+        "emerald", "large emerald", [ "emerald", "treasure" ], "", true,
+        { "adjectives" : [ "large" ], "value" : 5, "treasureValue" : 10, "location" : "buoy" }
+    ),
+    "shovel" : makeObject(
+        "shovel", "shovel", [ "shovel", "tool", "tools" ], "", true,
+        { "tool" : true, "size" : 15, "location" : "sandy_beach" }
+    ),
+    "sand" : makeObject(
+        "sand", "sand", [ "sand" ], "", false,
+        { "scenery" : true, "location" : "sandy_cave" }
+    ),
+    "scarab" : makeObject(
+        "scarab", "beautiful jeweled scarab", [ "scarab", "bug", "beetle", "treasure" ],
+        "", true,
+        { "adjectives" : [ "beautiful", "carved", "jeweled" ], "size" : 8, "value" : 5, "treasureValue" : 5,
+          "location" : "sandy_cave", "hidden" : true,
+          "note" : "TODO: hidden until dug up with the shovel (Task 6)." }
+    ),
+    "pot_of_gold" : makeObject(
+        "pot_of_gold", "pot of gold", [ "pot", "gold", "treasure" ],
+        "At the end of the rainbow is a pot of gold.", true,
+        { "adjectives" : [ "gold" ], "size" : 15, "value" : 10, "treasureValue" : 10,
+          "location" : "end_of_rainbow", "hidden" : true,
+          "note" : "TODO: hidden until the rainbow is made solid (rainbowFlag, via the sceptre — Task 6)." }
+    ),
+    "bracelet" : makeObject(
+        "bracelet", "sapphire-encrusted bracelet", [ "bracelet", "jewel", "sapphire", "treasure" ],
+        "", true,
+        { "adjectives" : [ "sapphire" ], "size" : 10, "value" : 5, "treasureValue" : 5, "location" : "gas_room" }
+    ),
+
+    // --- Coal mine area -----------------------------------------------------------
+
+    "jade" : makeObject(
+        "jade", "jade figurine", [ "figurine", "treasure" ],
+        "There is an exquisite jade figurine here.", true,
+        { "adjectives" : [ "exquisite", "jade" ], "size" : 10, "value" : 5, "treasureValue" : 5, "location" : "bat_room" }
+    ),
+    "bat" : makeObject(
+        "bat", "bat", [ "bat", "vampire" ], "", false,
+        { "adjectives" : [ "vampire", "deranged" ], "actor" : true, "location" : "bat_room",
+          "note" : "TODO: swoops you to a random room unless you're carrying garlic (Task 6)." }
+    ),
+    "lowered_basket" : makeObject(
+        "lowered_basket", "basket", [ "cage", "dumbwaiter", "basket" ],
+        "From the chain is suspended a basket.", false,
+        { "adjectives" : [ "lowered" ], "scenery" : true, "location" : "lower_shaft",
+          "note" : "TODO: dumbwaiter chain-pull to swap with raised_basket not implemented (Task 6)." }
+    ),
+    "raised_basket" : makeObject(
+        "raised_basket", "basket", [ "cage", "dumbwaiter", "basket" ],
+        "At the end of the chain is a basket.", false,
+        { "scenery" : true, "container" : true, "open" : true, "transparent" : true, "capacity" : 50,
+          "location" : "shaft_room",
+          "note" : "TODO: dumbwaiter chain-pull to swap with lowered_basket not implemented (Task 6)." }
+    ),
+    "coal" : makeObject(
+        "coal", "small pile of coal", [ "coal", "pile", "heap" ], "", true,
+        { "adjectives" : [ "small" ], "burnable" : true, "size" : 20, "location" : "dead_end_5" }
+    ),
+    "timbers" : makeObject(
+        "timbers", "broken timber", [ "timbers", "pile" ], "", true,
+        { "adjectives" : [ "wooden", "broken" ], "size" : 50, "location" : "timber_room" }
+    ),
+    "machine" : makeObject(
+        "machine", "machine", [ "machine", "pdp10", "dryer", "lid" ], "", false,
+        { "scenery" : true, "container" : true, "open" : false, "openable" : true, "capacity" : 50,
+          "location" : "machine_room" }
+    ),
+    "machine_switch" : makeObject(
+        "machine_switch", "switch", [ "switch" ], "", false,
+        { "scenery" : true, "location" : "machine_room",
+          "note" : "TODO: turning it on with coal+coal_room.machine should produce a diamond (Task 6)." }
+    ),
+    "diamond" : makeObject(
+        "diamond", "huge diamond", [ "diamond", "treasure" ],
+        "There is an enormous diamond (perfectly cut) here.", true,
+        { "adjectives" : [ "huge", "enormous" ], "value" : 10, "treasureValue" : 10, "location" : "",
+          "note" : "TODO: created from coal by the machine (Task 6); not placed until then." }
+    ),
+
+    // --- Up a Tree -----------------------------------------------------------------
+
+    "nest" : makeObject(
+        "nest", "bird's nest", [ "nest" ],
+        "Beside you on the branch is a small bird's nest.", true,
+        { "adjectives" : [ "birds" ], "container" : true, "openable" : true, "open" : true,
+          "capacity" : 20, "location" : "up_a_tree" }
+    ),
+    // ACTION EGG-OBJECT (fragility/breaking on rough handling) is a puzzle
+    // mechanic not implemented — take/examine/open only (Task 6).
+    "egg" : makeObject(
+        "egg", "jewel-encrusted egg", [ "egg", "treasure" ],
+"In the bird's nest is a large egg encrusted with precious jewels,
+apparently scavenged by a childless songbird. The egg is covered with
+fine gold inlay, and ornamented in lapis lazuli and mother-of-pearl.
+Unlike most eggs, this one is hinged and closed with a delicate looking
+clasp. The egg appears extremely fragile.",
+        true,
+        { "adjectives" : [ "birds", "encrusted", "jeweled" ], "container" : true, "openable" : true,
+          "open" : false, "capacity" : 6, "value" : 5, "treasureValue" : 5, "location" : "nest",
+          "note" : "TODO: breaks (and damages any canary inside) on rough handling; not implemented (Task 6)." }
+    ),
+    "broken_egg" : makeObject(
+        "broken_egg", "broken jewel-encrusted egg", [ "egg", "treasure" ],
+        "There is a somewhat ruined egg here.", true,
+        { "adjectives" : [ "broken", "birds", "encrusted", "jewel" ], "container" : true, "open" : true,
+          "capacity" : 6, "treasureValue" : 2, "location" : "",
+          "note" : "TODO: replaces `egg` once it's broken (Task 6); not placed until then." }
+    ),
+    "canary" : makeObject(
+        "canary", "golden clockwork canary", [ "canary", "treasure" ],
+"There is a golden clockwork canary nestled in the egg. It has ruby
+eyes and a silver beak. Through a crystal window below its left
+wing you can see intricate machinery inside. It appears to have
+wound down.",
+        true,
+        { "adjectives" : [ "clockwork", "gold", "golden" ], "value" : 6, "treasureValue" : 4, "location" : "egg",
+          "note" : "TODO: winding it (with the bauble payoff in a forest room) not implemented (Task 6)." }
+    ),
+    "broken_canary" : makeObject(
+        "broken_canary", "broken clockwork canary", [ "canary", "treasure" ], "", true,
+        { "adjectives" : [ "broken", "clockwork", "gold", "golden" ], "location" : "",
+          "note" : "TODO: replaces `canary` once it's broken (Task 6); not placed until then." }
+    ),
+    "bauble" : makeObject(
+        "bauble", "beautiful brass bauble", [ "bauble", "treasure" ], "", true,
+        { "adjectives" : [ "brass", "beautiful" ], "value" : 1, "treasureValue" : 1, "location" : "",
+          "note" : "TODO: dropped by the songbird after winding the canary (Task 6); not placed until then." }
+    ),
+
+    // --- Reservoir / Atlantis treasures, dome, temple (continued) -------------------
+
+    "trident" : makeObject(
+        "trident", "crystal trident", [ "trident", "fork", "treasure" ],
+        "On the shore lies Poseidon's own crystal trident.", true,
+        { "adjectives" : [ "poseidon", "own", "crystal" ], "size" : 20, "value" : 4, "treasureValue" : 11,
+          "location" : "atlantis_room" }
+    ),
+    "pedestal" : makeObject(
+        "pedestal", "pedestal", [ "pedestal" ], "", false,
+        { "adjectives" : [ "white", "marble" ], "scenery" : true, "container" : true, "open" : true,
+          "openable" : true, "capacity" : 30, "location" : "torch_room" }
+    ),
+    "torch" : makeObject(
+        "torch", "torch", [ "torch", "ivory", "treasure" ],
+        "Sitting on the pedestal is a flaming torch, made of ivory.", true,
+        { "adjectives" : [ "flaming", "ivory" ], "light" : true, "on" : true, "size" : 20,
+          "value" : 14, "treasureValue" : 6, "location" : "pedestal" }
+    ),
+    "candles" : makeObject(
+        "candles", "pair of candles", [ "candles", "pair" ],
+        "On the two ends of the altar are burning candles.", true,
+        { "adjectives" : [ "burning" ], "light" : true, "on" : true, "size" : 10, "location" : "south_temple" }
+    ),
+    "map" : makeObject(
+        "map", "ancient map", [ "parchment", "map" ],
+        "In the trophy case is an ancient parchment which appears to be a map.", true,
+        {
+            "adjectives" : [ "antique", "old", "ancient" ], "readable" : true, "size" : 2,
+            "text" :
+"The map shows a forest with three clearings. The largest clearing contains
+a house. Three paths leave the large clearing. One of these paths, leading
+southwest, is marked ""To Stone Barrow"".",
+            "location" : "trophy_case", "hidden" : true,
+            "note" : "TODO: trigger for revealing the map isn't implemented (Task 6)."
+        }
+    ),
+    "leaves" : makeObject(
+        "leaves", "pile of leaves", [ "leaves", "leaf", "pile" ],
+        "On the ground is a pile of leaves.", true,
+        { "burnable" : true, "size" : 25, "location" : "grating_clearing" }
+    ),
+    "gunk" : makeObject(
+        "gunk", "small piece of vitreous slag", [ "gunk", "piece", "slag" ], "", true,
+        { "adjectives" : [ "small", "vitreous" ], "size" : 10, "location" : "",
+          "note" : "TODO: created when the putty is melted by the torch (Task 6); not placed until then." }
+    ),
+    "broken_lamp" : makeObject(
+        "broken_lamp", "broken lantern", [ "lamp", "lantern" ], "", true,
+        { "adjectives" : [ "broken" ], "location" : "",
+          "note" : "TODO: replaces `brass_lantern` if it's thrown/burns out (Task 6); not placed until then." }
+    ),
+
+    // --- Endgame (Stone Barrow) -----------------------------------------------------
+
+    "barrow_door" : makeObject(
+        "barrow_door", "stone door", [ "door" ], "", false,
+        { "adjectives" : [ "huge", "stone" ], "scenery" : true, "door" : true, "open" : true, "location" : "stone_barrow" }
+    ),
+    "barrow" : makeObject(
+        "barrow", "stone barrow", [ "barrow", "tomb" ], "", false,
+        { "adjectives" : [ "massive", "stone" ], "scenery" : true, "location" : "stone_barrow" }
+    )
+};
+
+rooms = {
+
+    // --- House and surrounding forest -----------------------------------
+
+    "west_of_house" : {
+        "id"          : "west_of_house",
+        "name"        : "West of House",
+        "description" : "You are standing in an open field west of a white house, with a boarded front door.",
+        "exits"       : {
+            "north" : "north_of_house",
+            "south" : "south_of_house",
+            "ne"    : "north_of_house",
+            "se"    : "south_of_house",
+            "west"  : "forest_1",
+            "east"  : { "blocked" : "The door is boarded and you can't remove the boards." },
+            "sw"    : { "to" : "stone_barrow", "requiresFlag" : "wonFlag" },
+            "in"    : { "to" : "stone_barrow", "requiresFlag" : "wonFlag" }
+        }
+    },
+
+    // Endgame room. Only reachable once every treasure has been deposited
+    // in the trophy case (see Task 7 — scoring/endgame, not yet wired up).
+    "stone_barrow" : {
+        "id"          : "stone_barrow",
+        "name"        : "Stone Barrow",
+        "description" :
+"You are standing in front of a massive barrow of stone. In the east face
+is a huge stone door which is open. You cannot see into the dark of the tomb.",
+        "exits"       : {
+            "ne" : "west_of_house"
+        }
+    },
+
+    "north_of_house" : {
+        "id"          : "north_of_house",
+        "name"        : "North of House",
+        "description" :
+"You are facing the north side of a white house. There is no door here,
+and all the windows are boarded up. To the north a narrow path winds through
+the trees.",
+        "exits"       : {
+            "sw"    : "west_of_house",
+            "se"    : "behind_house",
+            "west"  : "west_of_house",
+            "east"  : "behind_house",
+            "north" : "path",
+            "south" : { "blocked" : "The windows are all boarded." }
+        }
+    },
+
+    "south_of_house" : {
+        "id"          : "south_of_house",
+        "name"        : "South of House",
+        "description" :
+"You are facing the south side of a white house. There is no door here,
+and all the windows are boarded.",
+        "exits"       : {
+            "west"  : "west_of_house",
+            "east"  : "behind_house",
+            "ne"    : "behind_house",
+            "nw"    : "west_of_house",
+            "south" : "forest_3",
+            "north" : { "blocked" : "The windows are all boarded." }
+        }
+    },
+
+    // ZIL's internal name is EAST-OF-HOUSE; DESC is "Behind House".
+    "behind_house" : {
+        "id"          : "behind_house",
+        "name"        : "Behind House",
+        "dynamicDescription" : (allObjects) => {
+            var windowState = allObjects.kitchen_window.open ? "open." : "slightly ajar.";
+            return "You are behind the white house. A path leads into the forest
+to the east. In one corner of the house there is a small window
+which is " & windowState;
+        },
+        "exits"       : {
+            "north" : "north_of_house",
+            "south" : "south_of_house",
+            "sw"    : "south_of_house",
+            "nw"    : "north_of_house",
+            "east"  : "clearing",
+            "west"  : { "to" : "kitchen", "requiresOpen" : "kitchen_window" },
+            "in"    : { "to" : "kitchen", "requiresOpen" : "kitchen_window" }
+        }
+    },
+
+    "forest_1" : {
+        "id"          : "forest_1",
+        "name"        : "Forest",
+        "description" :
+"This is a forest, with trees in all directions. To the east,
+there appears to be sunlight.",
+        "exits"       : {
+            "up"    : { "blocked" : "There is no tree here suitable for climbing." },
+            "north" : "grating_clearing",
+            "east"  : "path",
+            "south" : "forest_3",
+            "west"  : { "blocked" : "You would need a machete to go further west." }
+        }
+    },
+
+    "forest_2" : {
+        "id"          : "forest_2",
+        "name"        : "Forest",
+        "description" : "This is a dimly lit forest, with large trees all around.",
+        "exits"       : {
+            "up"    : { "blocked" : "There is no tree here suitable for climbing." },
+            "north" : { "blocked" : "The forest becomes impenetrable to the north." },
+            "east"  : "mountains",
+            "south" : "clearing",
+            "west"  : "path"
+        }
+    },
+
+    "mountains" : {
+        "id"          : "mountains",
+        "name"        : "Forest",
+        "description" : "The forest thins out, revealing impassable mountains.",
+        "exits"       : {
+            "up"    : { "blocked" : "The mountains are impassable." },
+            "north" : "forest_2",
+            "east"  : { "blocked" : "The mountains are impassable." },
+            "south" : "forest_2",
+            "west"  : "forest_2"
+        }
+    },
+
+    "forest_3" : {
+        "id"          : "forest_3",
+        "name"        : "Forest",
+        "description" : "This is a dimly lit forest, with large trees all around.",
+        "exits"       : {
+            "up"    : { "blocked" : "There is no tree here suitable for climbing." },
+            "north" : "clearing",
+            "east"  : { "blocked" : "The rank undergrowth prevents eastward movement." },
+            "south" : { "blocked" : "Storm-tossed trees block your way." },
+            "west"  : "forest_1",
+            "nw"    : "south_of_house"
+        }
+    },
+
+    "path" : {
+        "id"          : "path",
+        "name"        : "Forest Path",
+        "description" :
+"This is a path winding through a dimly lit forest. The path heads
+north-south here. One particularly large tree with some low branches
+stands at the edge of the path.",
+        "exits"       : {
+            "up"    : "up_a_tree",
+            "north" : "grating_clearing",
+            "east"  : "forest_2",
+            "south" : "north_of_house",
+            "west"  : "forest_1"
+        }
+    },
+
+    "up_a_tree" : {
+        "id"          : "up_a_tree",
+        "name"        : "Up a Tree",
+        "description" :
+"You are about 10 feet above the ground nestled among some large
+branches. The nearest branch above you is above your reach.",
+        "exits"       : {
+            "down" : "path",
+            "up"   : { "blocked" : "You cannot climb any higher." }
+        }
+    },
+
+    // ZIL's GRATING-CLEARING (DESC "Clearing", distinct from CLEARING below).
+    "grating_clearing" : {
+        "id"          : "grating_clearing",
+        "name"        : "Clearing",
+        "dynamicDescription" : (allObjects) => {
+            var text = "You are in a clearing, with a forest surrounding you on all sides. A
+path leads south.";
+            if ( allObjects.grate.open ) {
+                text &= NEWLINE & "There is an open grating, descending into darkness.";
+            } else if ( gameState.flags.grateRevealed ) {
+                text &= NEWLINE & "There is a grating securely fastened into the ground.";
+            }
+            return text;
+        },
+        "exits"       : {
+            "north" : { "blocked" : "The forest becomes impenetrable to the north." },
+            "east"  : "forest_2",
+            "west"  : "forest_1",
+            "south" : "path",
+            "down"  : { "per" : "grating_exit" }
+        }
+    },
+
+    "clearing" : {
+        "id"          : "clearing",
+        "name"        : "Clearing",
+        "description" :
+"You are in a small clearing in a well marked forest path that
+extends to the east and west.",
+        "exits"       : {
+            "up"    : { "blocked" : "There is no tree here suitable for climbing." },
+            "east"  : "canyon_view",
+            "north" : "forest_2",
+            "south" : "forest_3",
+            "west"  : "behind_house"
+        }
+    },
+
+    "kitchen" : {
+        "id"          : "kitchen",
+        "name"        : "Kitchen",
+        "dynamicDescription" : (allObjects) => {
+            var windowState = allObjects.kitchen_window.open ? "open." : "slightly ajar.";
+            return "You are in the kitchen of the white house. A table seems to
+have been used recently for the preparation of food. A passage
+leads to the west and a dark staircase can be seen leading
+upward. A dark chimney leads down and to the east is a small
+window which is " & windowState;
+        },
+        "exits"       : {
+            "east"  : { "to" : "behind_house", "requiresOpen" : "kitchen_window" },
+            "out"   : { "to" : "behind_house", "requiresOpen" : "kitchen_window" },
+            "west"  : "living_room",
+            "up"    : "attic",
+            // DOWN TO STUDIO IF FALSE-FLAG: FALSE-FLAG is always false in
+            // source (dead exit) — chimney is permanently impassable here.
+            "down"  : { "blocked" : "Only Santa Claus climbs down chimneys." }
+        }
+    },
+
+    "attic" : {
+        "id"          : "attic",
+        "name"        : "Attic",
+        "description" : "This is the attic. The only exit is a stairway leading down.",
+        "exits"       : {
+            "down" : "kitchen"
+        }
+    },
+
+    "living_room" : {
+        "id"          : "living_room",
+        "name"        : "Living Room",
+        // Matches LIVING-ROOM-FCN's branching exactly: doorway text depends
+        // on magicFlag, and the rug/trap-door clause depends on rugMoved
+        // and the trap door's open state.
+        "dynamicDescription" : (allObjects) => {
+            var text = "You are in the living room. There is a doorway to the east";
+            text &= gameState.flags.magicFlag ?
+". To the
+west is a cyclops-shaped opening in an old wooden door, above which is
+some strange gothic lettering, " :
+", a wooden
+door with strange gothic lettering to the west, which appears to be
+nailed shut, ";
+            text &= "a trophy case, ";
+            if ( gameState.flags.rugMoved && allObjects.trap_door.open ) {
+                text &= "and a rug lying beside an open trap door.";
+            } else if ( gameState.flags.rugMoved ) {
+                text &= "and a closed trap door at your feet.";
+            } else if ( allObjects.trap_door.open ) {
+                text &= "and an open trap door at your feet.";
+            } else {
+                text &= "and a large oriental rug in the center of the room.";
+            }
+            return text;
+        },
+        "exits"       : {
+            "east" : "kitchen",
+            "west" : { "to" : "strange_passage", "requiresFlag" : "magicFlag", "blockedMessage" : "The door is nailed shut." },
+            "down" : { "to" : "cellar", "requiresOpen" : "trap_door", "blockedMessage" : "You can't go that way." }
+        }
+    },
+
+    // --- Cellar, Troll Room, and the gallery ----------------------------
+
+    "cellar" : {
+        "id"          : "cellar",
+        "name"        : "Cellar",
+        "description" :
+"You are in a dark and damp cellar with a narrow passageway leading
+north, and a crawlway to the south. On the west is the bottom of a
+steep metal ramp which is unclimbable.",
+        "exits"       : {
+            "north" : "troll_room",
+            "south" : "east_of_chasm",
+            "up"    : { "to" : "living_room", "requiresOpen" : "trap_door" },
+            "west"  : { "blocked" : "You try to ascend the ramp, but it is impossible, and you slide back down." }
+        }
+    },
+
+    "troll_room" : {
+        "id"          : "troll_room",
+        "name"        : "The Troll Room",
+        "description" :
+"This is a small room with passages to the east and south and a
+forbidding hole leading west. Bloodstains and deep scratches
+(perhaps made by an axe) mar the walls.",
+        "exits"       : {
+            "south" : "cellar",
+            "east"  : { "to" : "ew_passage", "requiresFlag" : "trollFlag", "blockedMessage" : "The troll fends you off with a menacing gesture." },
+            "west"  : { "to" : "maze_1", "requiresFlag" : "trollFlag", "blockedMessage" : "The troll fends you off with a menacing gesture." }
+        }
+    },
+
+    "east_of_chasm" : {
+        "id"          : "east_of_chasm",
+        "name"        : "East of Chasm",
+        "description" :
+"You are on the east edge of a chasm, the bottom of which cannot be
+seen. A narrow passage goes north, and the path you are on continues
+to the east.",
+        "exits"       : {
+            "north" : "cellar",
+            "east"  : "gallery",
+            "down"  : { "blocked" : "The chasm probably leads straight to the infernal regions." }
+        }
+    },
+
+    "gallery" : {
+        "id"          : "gallery",
+        "name"        : "Gallery",
+        "description" :
+"This is an art gallery. Most of the paintings have been stolen by
+vandals with exceptional taste. The vandals left through either the
+north or west exits.",
+        "exits"       : {
+            "west"  : "east_of_chasm",
+            "north" : "studio"
+        }
+    },
+
+    "studio" : {
+        "id"          : "studio",
+        "name"        : "Studio",
+        "description" :
+"This appears to have been an artist's studio. The walls and floors are
+splattered with paints of 69 different colors. Strangely enough, nothing
+of value is hanging here. At the south end of the room is an open door
+(also covered with paint). A dark and narrow chimney leads up from a
+fireplace; although you might be able to get up it, it seems unlikely
+you could get back down.",
+        "exits"       : {
+            "south" : "gallery",
+            "up"    : { "per" : "up_chimney" }
+        }
+    },
+
+    // --- Maze of twisty little passages ---------------------------------
+
+    "maze_1" : {
+        "id" : "maze_1", "name" : "Maze",
+        "description" : "This is part of a maze of twisty little passages, all alike.",
+        "exits" : { "east" : "troll_room", "north" : "maze_1", "south" : "maze_2", "west" : "maze_4" }
+    },
+    "maze_2" : {
+        "id" : "maze_2", "name" : "Maze",
+        "description" : "This is part of a maze of twisty little passages, all alike.",
+        "exits" : { "south" : "maze_1", "down" : { "per" : "maze_diodes" }, "east" : "maze_3" }
+    },
+    "maze_3" : {
+        "id" : "maze_3", "name" : "Maze",
+        "description" : "This is part of a maze of twisty little passages, all alike.",
+        "exits" : { "west" : "maze_2", "north" : "maze_4", "up" : "maze_5" }
+    },
+    "maze_4" : {
+        "id" : "maze_4", "name" : "Maze",
+        "description" : "This is part of a maze of twisty little passages, all alike.",
+        "exits" : { "west" : "maze_3", "north" : "maze_1", "east" : "dead_end_1" }
+    },
+    "dead_end_1" : {
+        "id" : "dead_end_1", "name" : "Dead End",
+        "description" : "You have come to a dead end in the maze.",
+        "exits" : { "south" : "maze_4" }
+    },
+    "maze_5" : {
+        "id" : "maze_5", "name" : "Maze",
+        "description" :
+"This is part of a maze of twisty little passages, all alike.
+A skeleton, probably the remains of a luckless adventurer, lies here.",
+        "exits" : { "east" : "dead_end_2", "north" : "maze_3", "sw" : "maze_6" }
+    },
+    "dead_end_2" : {
+        "id" : "dead_end_2", "name" : "Dead End",
+        "description" : "You have come to a dead end in the maze.",
+        "exits" : { "west" : "maze_5" }
+    },
+    "maze_6" : {
+        "id" : "maze_6", "name" : "Maze",
+        "description" : "This is part of a maze of twisty little passages, all alike.",
+        "exits" : { "down" : "maze_5", "east" : "maze_7", "west" : "maze_6", "up" : "maze_9" }
+    },
+    "maze_7" : {
+        "id" : "maze_7", "name" : "Maze",
+        "description" : "This is part of a maze of twisty little passages, all alike.",
+        "exits" : { "up" : "maze_14", "west" : "maze_6", "down" : { "per" : "maze_diodes" }, "east" : "maze_8", "south" : "maze_15" }
+    },
+    "maze_8" : {
+        "id" : "maze_8", "name" : "Maze",
+        "description" : "This is part of a maze of twisty little passages, all alike.",
+        "exits" : { "ne" : "maze_7", "west" : "maze_8", "se" : "dead_end_3" }
+    },
+    "dead_end_3" : {
+        "id" : "dead_end_3", "name" : "Dead End",
+        "description" : "You have come to a dead end in the maze.",
+        "exits" : { "north" : "maze_8" }
+    },
+    "maze_9" : {
+        "id" : "maze_9", "name" : "Maze",
+        "description" : "This is part of a maze of twisty little passages, all alike.",
+        "exits" : { "north" : "maze_6", "down" : { "per" : "maze_diodes" }, "east" : "maze_10", "south" : "maze_13", "west" : "maze_12", "nw" : "maze_9" }
+    },
+    "maze_10" : {
+        "id" : "maze_10", "name" : "Maze",
+        "description" : "This is part of a maze of twisty little passages, all alike.",
+        "exits" : { "east" : "maze_9", "west" : "maze_13", "up" : "maze_11" }
+    },
+    "maze_11" : {
+        "id" : "maze_11", "name" : "Maze",
+        "description" : "This is part of a maze of twisty little passages, all alike.",
+        "exits" : { "ne" : "grating_room", "down" : "maze_10", "nw" : "maze_13", "sw" : "maze_12" }
+    },
+    "grating_room" : {
+        "id" : "grating_room", "name" : "Grating Room",
+        "description" :
+"You are in a small room near the maze. There are twisty passages
+in the immediate vicinity.",
+        "onEnter" : () => { gameState.flags.grateRevealed = true; objects.grate.hidden = false; },
+        "exits" : {
+            "sw" : "maze_11",
+            "up" : { "to" : "grating_clearing", "requiresOpen" : "grate", "blockedMessage" : "The grating is closed." }
+        }
+    },
+    "maze_12" : {
+        "id" : "maze_12", "name" : "Maze",
+        "description" : "This is part of a maze of twisty little passages, all alike.",
+        "exits" : { "down" : { "per" : "maze_diodes" }, "sw" : "maze_11", "east" : "maze_13", "up" : "maze_9", "north" : "dead_end_4" }
+    },
+    "dead_end_4" : {
+        "id" : "dead_end_4", "name" : "Dead End",
+        "description" : "You have come to a dead end in the maze.",
+        "exits" : { "south" : "maze_12" }
+    },
+    "maze_13" : {
+        "id" : "maze_13", "name" : "Maze",
+        "description" : "This is part of a maze of twisty little passages, all alike.",
+        "exits" : { "east" : "maze_9", "down" : "maze_12", "south" : "maze_10", "west" : "maze_11" }
+    },
+    "maze_14" : {
+        "id" : "maze_14", "name" : "Maze",
+        "description" : "This is part of a maze of twisty little passages, all alike.",
+        "exits" : { "west" : "maze_15", "nw" : "maze_14", "ne" : "maze_7", "south" : "maze_7" }
+    },
+    "maze_15" : {
+        "id" : "maze_15", "name" : "Maze",
+        "description" : "This is part of a maze of twisty little passages, all alike.",
+        "exits" : { "west" : "maze_14", "south" : "maze_7", "se" : "cyclops_room" }
+    },
+
+    // --- Cyclops and the hideaway ----------------------------------------
+
+    "cyclops_room" : {
+        "id" : "cyclops_room", "name" : "Cyclops Room",
+        // Simplified from CYCLOPS-ROOM-FCN: the source also tracks
+        // CYCLOWRATH (an anger meter from feeding it hot peppers) with two
+        // extra description variants — not modeled, defaults to "present".
+        "dynamicDescription" : () => {
+            var text = "This room has an exit on the northwest, and a staircase leading up.";
+            if ( gameState.flags.cyclopsFlag && !gameState.flags.magicFlag ) {
+                text &= NEWLINE & "The cyclops is sleeping blissfully at the foot of the stairs.";
+            } else if ( gameState.flags.magicFlag ) {
+                text &= NEWLINE & "The east wall, previously solid, now has a cyclops-sized opening in it.";
+            } else {
+                text &= NEWLINE &
+"A cyclops, who looks prepared to eat horses (much less mere
+adventurers), blocks the staircase. From his state of health, and
+the bloodstains on the walls, you gather that he is not very
+friendly, though he likes people.";
+            }
+            return text;
+        },
+        "exits" : {
+            "nw"   : "maze_15",
+            "east" : { "to" : "strange_passage", "requiresFlag" : "magicFlag", "blockedMessage" : "The east wall is solid rock." },
+            "up"   : { "to" : "treasure_room", "requiresFlag" : "cyclopsFlag", "blockedMessage" : "The cyclops doesn't look like he'll let you past." }
+        }
+    },
+
+    "strange_passage" : {
+        "id" : "strange_passage", "name" : "Strange Passage",
+        "description" :
+"This is a long passage. To the west is one entrance. On the
+east there is an old wooden door, with a large opening in it (about
+cyclops sized).",
+        "exits" : { "west" : "cyclops_room", "in" : "cyclops_room", "east" : "living_room" }
+    },
+
+    "treasure_room" : {
+        "id" : "treasure_room", "name" : "Treasure Room",
+        // TREASURE-ROOM-FCN also handles the Thief's lair/combat dynamics
+        // (Task 5 — not implemented yet); static LDESC shown unconditionally.
+        "description" :
+"This is a large room, whose east wall is solid granite. A number
+of discarded bags, which crumble at your touch, are scattered about
+on the floor. There is an exit down a staircase.",
+        "exits" : { "down" : "cyclops_room" }
+    },
+
+    // --- Reservoir area ---------------------------------------------------
+
+    "reservoir_south" : {
+        "id" : "reservoir_south", "name" : "Reservoir South",
+        // Simplified from RESERVOIR-SOUTH-FCN: source has a 4-way
+        // (full lake / draining / refilling / drained) description; the
+        // transitional GATES-OPEN states aren't modeled, just the two
+        // steady states.
+        "dynamicDescription" : () => {
+            var text = gameState.flags.lowTide ?
+"You are in a long room, to the north of which is a wide area which
+was formerly a reservoir, but now is merely a stream. You notice,
+however, that the level of the stream is rising quickly and that
+before long it will be impossible to cross here." :
+"You are in a long room on the south shore of a large lake, far
+too deep and wide for crossing.";
+            return text & NEWLINE &
+"There is a path along the stream to the east or west, a steep pathway
+climbing southwest along the edge of a chasm, and a path leading into a
+canyon to the southeast.";
+        },
+        "exits" : {
+            "se"   : "deep_canyon",
+            "sw"   : "chasm_room",
+            "east" : "dam_room",
+            "west" : "stream_view",
+            "north" : { "to" : "reservoir", "requiresFlag" : "lowTide", "blockedMessage" : "You would drown." }
+        }
+    },
+
+    "reservoir" : {
+        "id" : "reservoir", "name" : "Reservoir",
+        "dynamicDescription" : () => gameState.flags.lowTide ?
+"You are on what used to be a large lake, but which is now a large
+mud pile. There are ""shores"" to the north and south." :
+"You are on the lake. Beaches can be seen north and south.
+Upstream a small stream enters the lake through a narrow cleft
+in the rocks. The dam can be seen downstream.",
+        "exits" : {
+            "north" : "reservoir_north",
+            "south" : "reservoir_south",
+            "up"    : "in_stream",
+            "west"  : "in_stream",
+            "down"  : { "blocked" : "The dam blocks your way." }
+        }
+    },
+
+    "reservoir_north" : {
+        "id" : "reservoir_north", "name" : "Reservoir North",
+        "dynamicDescription" : () => {
+            var text = gameState.flags.lowTide ?
+"You are in a cavernous area, to the south of which is a very wide
+stream. The level of the stream is rising rapidly, and it appears
+that before long it will be impossible to cross to the other side." :
+"You are in a large cavernous room, north of a large lake.";
+            return text & NEWLINE & "There is a slimy stairway leaving the room to the north.";
+        },
+        "exits" : {
+            "north" : "atlantis_room",
+            "south" : { "to" : "reservoir", "requiresFlag" : "lowTide", "blockedMessage" : "You would drown." }
+        }
+    },
+
+    "stream_view" : {
+        "id" : "stream_view", "name" : "Stream View",
+        "description" :
+"You are standing on a path beside a gently flowing stream. The path
+follows the stream, which flows from west to east.",
+        "exits" : {
+            "east" : "reservoir_south",
+            "west" : { "blocked" : "The stream emerges from a spot too small for you to enter." }
+        }
+    },
+
+    "in_stream" : {
+        "id" : "in_stream", "name" : "Stream",
+        "description" :
+"You are on the gently flowing stream. The upstream route is too narrow
+to navigate, and the downstream route is invisible due to twisting
+walls. There is a narrow beach to land on.",
+        "exits" : {
+            "up"   : { "blocked" : "The channel is too narrow." },
+            "west" : { "blocked" : "The channel is too narrow." },
+            "land" : "stream_view",
+            "down" : "reservoir",
+            "east" : "reservoir"
+        }
+    },
+
+    // --- Mirror rooms and vicinity ---------------------------------------
+
+    "mirror_room_1" : {
+        "id" : "mirror_room_1", "name" : "Mirror Room",
+        "description" :
+"You are in a large square room with tall ceilings. On the south wall
+is an enormous mirror which fills the entire wall. There are exits
+on the other three sides of the room.",
+        "exits" : { "north" : "cold_passage", "west" : "twisting_passage", "east" : "small_cave" }
+    },
+    "mirror_room_2" : {
+        "id" : "mirror_room_2", "name" : "Mirror Room",
+        "description" :
+"You are in a large square room with tall ceilings. On the south wall
+is an enormous mirror which fills the entire wall. There are exits
+on the other three sides of the room.",
+        "exits" : { "west" : "winding_passage", "north" : "narrow_passage", "east" : "tiny_cave" }
+    },
+    "small_cave" : {
+        "id" : "small_cave", "name" : "Cave",
+        "description" :
+"This is a tiny cave with entrances west and north, and a staircase
+leading down.",
+        "exits" : { "north" : "mirror_room_1", "down" : "atlantis_room", "south" : "atlantis_room", "west" : "twisting_passage" }
+    },
+    "tiny_cave" : {
+        "id" : "tiny_cave", "name" : "Cave",
+        "description" :
+"This is a tiny cave with entrances west and north, and a dark,
+forbidding staircase leading down.",
+        "exits" : { "north" : "mirror_room_2", "west" : "winding_passage", "down" : "entrance_to_hades" }
+    },
+    "cold_passage" : {
+        "id" : "cold_passage", "name" : "Cold Passage",
+        "description" :
+"This is a cold and damp corridor where a long east-west passageway
+turns into a southward path.",
+        "exits" : { "south" : "mirror_room_1", "west" : "slide_room" }
+    },
+    "narrow_passage" : {
+        "id" : "narrow_passage", "name" : "Narrow Passage",
+        "description" :
+"This is a long and narrow corridor where a long north-south passageway
+briefly narrows even further.",
+        "exits" : { "north" : "round_room", "south" : "mirror_room_2" }
+    },
+    "winding_passage" : {
+        "id" : "winding_passage", "name" : "Winding Passage",
+        "description" :
+"This is a winding passage. It seems that there are only exits
+on the east and north.",
+        "exits" : { "north" : "mirror_room_2", "east" : "tiny_cave" }
+    },
+    "twisting_passage" : {
+        "id" : "twisting_passage", "name" : "Twisting Passage",
+        "description" :
+"This is a winding passage. It seems that there are only exits
+on the east and north.",
+        "exits" : { "north" : "mirror_room_1", "east" : "small_cave" }
+    },
+    "atlantis_room" : {
+        "id" : "atlantis_room", "name" : "Atlantis Room",
+        "description" :
+"This is an ancient room, long under water. There is an exit to
+the south and a staircase leading up.",
+        "exits" : { "up" : "small_cave", "south" : "reservoir_north" }
+    },
+
+    // --- Round Room and vicinity ------------------------------------------
+
+    "ew_passage" : {
+        "id" : "ew_passage", "name" : "East-West Passage",
+        "description" :
+"This is a narrow east-west passageway. There is a narrow stairway
+leading down at the north end of the room.",
+        "exits" : { "east" : "round_room", "west" : "troll_room", "down" : "chasm_room", "north" : "chasm_room" }
+    },
+    "round_room" : {
+        "id" : "round_room", "name" : "Round Room",
+        "description" :
+"This is a circular stone room with passages in all directions. Several
+of them have unfortunately been blocked by cave-ins.",
+        "exits" : {
+            "east" : "loud_room", "west" : "ew_passage", "north" : "ns_passage",
+            "south" : "narrow_passage", "se" : "engravings_cave"
+        }
+    },
+    "deep_canyon" : {
+        "id" : "deep_canyon", "name" : "Deep Canyon",
+        // Simplified from DEEP-CANYON-F: transitional GATES-OPEN states
+        // collapsed to the two steady states (full reservoir / drained).
+        "dynamicDescription" : () => {
+            var text = "You are on the south edge of a deep canyon. Passages lead off to the
+east, northwest and southwest. A stairway leads down.";
+            if ( !gameState.flags.lowTide ) {
+                text &= " You can hear the sound of flowing water from below.";
+            }
+            return text;
+        },
+        "exits" : { "nw" : "reservoir_south", "east" : "dam_room", "sw" : "ns_passage", "down" : "loud_room" }
+    },
+    "damp_cave" : {
+        "id" : "damp_cave", "name" : "Damp Cave",
+        "description" :
+"This cave has exits to the west and east, and narrows to a crack toward
+the south. The earth is particularly damp here.",
+        "exits" : { "west" : "loud_room", "east" : "white_cliffs_north", "south" : { "blocked" : "It is too narrow for most insects." } }
+    },
+    "loud_room" : {
+        "id" : "loud_room", "name" : "Loud Room",
+        // ECHO-puzzle text (LOUD-ROOM-FCN) is part of Task 6, not yet wired.
+        "description" :
+"This is a large room with a ceiling which cannot be detected from the
+ground. There is a narrow passage from east to west and a stairway
+leading upward. The room is extremely noisy. As a matter of fact, it
+is almost deafening. There is an echo here.",
+        "exits" : { "east" : "damp_cave", "west" : "round_room", "up" : "deep_canyon" }
+    },
+    "ns_passage" : {
+        "id" : "ns_passage", "name" : "North-South Passage",
+        "description" :
+"This is a high north-south passage, which forks to the northeast.",
+        "exits" : { "north" : "chasm_room", "ne" : "deep_canyon", "south" : "round_room" }
+    },
+    "chasm_room" : {
+        "id" : "chasm_room", "name" : "Chasm",
+        "description" :
+"A chasm runs southwest to northeast and the path follows it. You are
+on the south side of the chasm, where a crack opens into a passage.",
+        "exits" : { "ne" : "reservoir_south", "sw" : "ew_passage", "up" : "ew_passage", "south" : "ns_passage", "down" : { "blocked" : "Are you out of your mind?" } }
+    },
+
+    // --- Hades --------------------------------------------------------------
+
+    "entrance_to_hades" : {
+        "id" : "entrance_to_hades", "name" : "Entrance to Hades",
+        // Simplified from LLD-ROOM: omits the EXORCISE-verb ceremony check
+        // and the "evil spirits jeer" line — Task 6.
+        "description" :
+"You are outside a large gateway, on which is inscribed
+
+  Abandon every hope
+all ye who enter here!
+
+The gate is open; through it you can see a desolation, with a pile of
+mangled bodies in one corner. Thousands of voices, lamenting some
+hideous fate, can be heard.",
+        "exits" : {
+            "up"    : "tiny_cave",
+            "in"    : { "to" : "land_of_living_dead", "requiresFlag" : "lldFlag", "blockedMessage" : "Some invisible force prevents you from passing through the gate." },
+            "south" : { "to" : "land_of_living_dead", "requiresFlag" : "lldFlag", "blockedMessage" : "Some invisible force prevents you from passing through the gate." }
+        }
+    },
+
+    "land_of_living_dead" : {
+        "id" : "land_of_living_dead", "name" : "Land of the Dead",
+        "description" :
+"You have entered the Land of the Living Dead. Thousands of lost souls
+can be heard weeping and moaning. In the corner are stacked the remains
+of dozens of previous adventurers less fortunate than yourself.
+A passage exits to the north.",
+        "exits" : { "out" : "entrance_to_hades", "north" : "entrance_to_hades" }
+    },
+
+    // --- Dome, Temple, Egypt -------------------------------------------------
+
+    "engravings_cave" : {
+        "id" : "engravings_cave", "name" : "Engravings Cave",
+        "description" : "You have entered a low cave with passages leading northwest and east.",
+        "exits" : { "nw" : "round_room", "east" : "dome_room" }
+    },
+    "egypt_room" : {
+        "id" : "egypt_room", "name" : "Egyptian Room",
+        "description" :
+"This is a room which looks like an Egyptian tomb. There is an
+ascending staircase to the west.",
+        "exits" : { "west" : "north_temple", "up" : "north_temple" }
+    },
+    "dome_room" : {
+        "id" : "dome_room", "name" : "Dome Room",
+        "dynamicDescription" : () => {
+            var text = "You are at the periphery of a large dome, which forms the ceiling
+of another room below. Protecting you from a precipitous drop is a
+wooden railing which circles the dome.";
+            if ( gameState.flags.domeFlag ) {
+                text &= NEWLINE & "Hanging down from the railing is a rope which ends about ten feet
+from the floor below.";
+            }
+            return text;
+        },
+        "exits" : {
+            "west" : "engravings_cave",
+            "down" : { "to" : "torch_room", "requiresFlag" : "domeFlag", "blockedMessage" : "You cannot go down without fracturing many bones." }
+        }
+    },
+    "torch_room" : {
+        "id" : "torch_room", "name" : "Torch Room",
+        "dynamicDescription" : () => {
+            var text = "This is a large room with a prominent doorway leading to a down
+staircase. Above you is a large dome. Up around the edge of the
+dome (20 feet up) is a wooden railing. In the center of the room
+sits a white marble pedestal.";
+            if ( gameState.flags.domeFlag ) {
+                text &= NEWLINE & "A piece of rope descends from the railing above, ending some
+five feet above your head.";
+            }
+            return text;
+        },
+        "exits" : { "up" : { "blocked" : "You cannot reach the rope." }, "south" : "north_temple", "down" : "north_temple" }
+    },
+    "north_temple" : {
+        "id" : "north_temple", "name" : "Temple",
+        "description" :
+"This is the north end of a large temple. On the east wall is an
+ancient inscription, probably a prayer in a long-forgotten language.
+Below the prayer is a staircase leading down. The west wall is solid
+granite. The exit to the north end of the room is through huge
+marble pillars.",
+        "exits" : {
+            "down" : "egypt_room", "east" : "egypt_room", "north" : "torch_room",
+            "out" : "torch_room", "up" : "torch_room", "south" : "south_temple"
+        }
+    },
+    "south_temple" : {
+        "id" : "south_temple", "name" : "Altar",
+        "description" :
+"This is the south end of a large temple. In front of you is what
+appears to be an altar. In one corner is a small hole in the floor
+which leads into darkness. You probably could not get back up it.",
+        "exits" : {
+            "north" : "north_temple",
+            "down"  : { "to" : "tiny_cave", "requiresFlag" : "coffinCure", "blockedMessage" : "You haven't a prayer of getting the coffin down there." }
+        }
+    },
+
+    // --- Flood Control Dam #3 -----------------------------------------------
+
+    "dam_room" : {
+        "id" : "dam_room", "name" : "Dam",
+        // Simplified from DAM-ROOM-FCN: GATES-OPEN transitional text and the
+        // glowing-bubble (GATE-FLAG) detail aren't modeled — Task 6.
+        "dynamicDescription" : () => {
+            var text = "You are standing on the top of the Flood Control Dam ##3, which was
+quite a tourist attraction in times far distant. There are paths to
+the north, south, and west, and a scramble down.";
+            text &= NEWLINE & ( gameState.flags.lowTide ?
+"The sluice gates are closed. The water level in the reservoir is
+quite low, but the level is rising quickly." :
+"The sluice gates on the dam are closed. Behind the dam, there can be
+seen a wide reservoir. Water is pouring over the top of the now
+abandoned dam." );
+            text &= NEWLINE & "There is a control panel here, on which a large metal bolt is mounted.
+Directly above the bolt is a small green plastic bubble.";
+            return text;
+        },
+        "exits" : { "south" : "deep_canyon", "down" : "dam_base", "east" : "dam_base", "north" : "dam_lobby", "west" : "reservoir_south" }
+    },
+    "dam_lobby" : {
+        "id" : "dam_lobby", "name" : "Dam Lobby",
+        "description" :
+"This room appears to have been the waiting room for groups touring
+the dam. There are open doorways here to the north and east marked
+""Private"", and there is a path leading south over the top of the dam.",
+        "exits" : { "south" : "dam_room", "north" : "maintenance_room", "east" : "maintenance_room" }
+    },
+    "maintenance_room" : {
+        "id" : "maintenance_room", "name" : "Maintenance Room",
+        "description" :
+"This is what appears to have been the maintenance room for Flood
+Control Dam ##3. Apparently, this room has been ransacked recently, for
+most of the valuable equipment is gone. On the wall in front of you is a
+group of buttons colored blue, yellow, brown, and red. There are doorways to
+the west and south.",
+        "exits" : { "south" : "dam_lobby", "west" : "dam_lobby" }
+    },
+
+    // --- River area -----------------------------------------------------------
+
+    "dam_base" : {
+        "id" : "dam_base", "name" : "Dam Base",
+        "description" :
+"You are at the base of Flood Control Dam ##3, which looms above you
+and to the north. The river Frigid is flowing by here. Along the
+river are the White Cliffs which seem to form giant walls stretching
+from north to south along the shores of the river as it winds its
+way downstream.",
+        "exits" : { "north" : "dam_room", "up" : "dam_room" }
+    },
+    "river_1" : {
+        "id" : "river_1", "name" : "Frigid River",
+        "description" :
+"You are on the Frigid River in the vicinity of the Dam. The river
+flows quietly here. There is a landing on the west shore.",
+        "exits" : {
+            "up" : { "blocked" : "You cannot go upstream due to strong currents." },
+            "west" : "dam_base", "land" : "dam_base", "down" : "river_2",
+            "east" : { "blocked" : "The White Cliffs prevent your landing here." }
+        }
+    },
+    "river_2" : {
+        "id" : "river_2", "name" : "Frigid River",
+        "description" :
+"The river turns a corner here making it impossible to see the
+Dam. The White Cliffs loom on the east bank and large rocks prevent
+landing on the west.",
+        "exits" : {
+            "up" : { "blocked" : "You cannot go upstream due to strong currents." },
+            "down" : "river_3",
+            "land" : { "blocked" : "There is no safe landing spot here." },
+            "east" : { "blocked" : "The White Cliffs prevent your landing here." },
+            "west" : { "blocked" : "Just in time you steer away from the rocks." }
+        }
+    },
+    "river_3" : {
+        "id" : "river_3", "name" : "Frigid River",
+        "description" :
+"The river descends here into a valley. There is a narrow beach on the
+west shore below the cliffs. In the distance a faint rumbling can be
+heard.",
+        "exits" : {
+            "up" : { "blocked" : "You cannot go upstream due to strong currents." },
+            "down" : "river_4", "land" : "white_cliffs_north", "west" : "white_cliffs_north"
+        }
+    },
+    "white_cliffs_north" : {
+        "id" : "white_cliffs_north", "name" : "White Cliffs Beach",
+        "description" :
+"You are on a narrow strip of beach which runs along the base of the
+White Cliffs. There is a narrow path heading south along the Cliffs
+and a tight passage leading west into the cliffs themselves.",
+        "exits" : {
+            "south" : { "to" : "white_cliffs_south", "requiresNotCarrying" : "inflated_boat", "blockedMessage" : "The path is too narrow." },
+            "west"  : { "to" : "damp_cave", "requiresNotCarrying" : "inflated_boat", "blockedMessage" : "The path is too narrow." }
+        }
+    },
+    "white_cliffs_south" : {
+        "id" : "white_cliffs_south", "name" : "White Cliffs Beach",
+        "description" :
+"You are on a rocky, narrow strip of beach beside the Cliffs. A
+narrow path leads north along the shore.",
+        "exits" : {
+            "north" : { "to" : "white_cliffs_north", "requiresNotCarrying" : "inflated_boat", "blockedMessage" : "The path is too narrow." }
+        }
+    },
+    "river_4" : {
+        "id" : "river_4", "name" : "Frigid River",
+        "description" :
+"The river is running faster here and the sound ahead appears to be
+that of rushing water. On the east shore is a sandy beach. A small
+area of beach can also be seen below the cliffs on the west shore.",
+        "exits" : {
+            "up" : { "blocked" : "You cannot go upstream due to strong currents." },
+            "down" : "river_5",
+            "land" : { "blocked" : "You can land either to the east or the west." },
+            "west" : "white_cliffs_south", "east" : "sandy_beach"
+        }
+    },
+    "river_5" : {
+        "id" : "river_5", "name" : "Frigid River",
+        "description" :
+"The sound of rushing water is nearly unbearable here. On the east
+shore is a large landing area.",
+        "exits" : {
+            "up" : { "blocked" : "You cannot go upstream due to strong currents." },
+            "east" : "shore", "land" : "shore"
+        }
+    },
+    "shore" : {
+        "id" : "shore", "name" : "Shore",
+        "description" :
+"You are on the east shore of the river. The water here seems somewhat
+treacherous. A path travels from north to south here, the south end
+quickly turning around a sharp corner.",
+        "exits" : { "north" : "sandy_beach", "south" : "aragain_falls" }
+    },
+    "sandy_beach" : {
+        "id" : "sandy_beach", "name" : "Sandy Beach",
+        "description" :
+"You are on a large sandy beach on the east shore of the river, which is
+flowing quickly by. A path runs beside the river to the south here, and
+a passage is partially buried in sand to the northeast.",
+        "exits" : { "ne" : "sandy_cave", "south" : "shore" }
+    },
+    "sandy_cave" : {
+        "id" : "sandy_cave", "name" : "Sandy Cave",
+        "description" : "This is a sand-filled cave whose exit is to the southwest.",
+        "exits" : { "sw" : "sandy_beach" }
+    },
+    "aragain_falls" : {
+        "id" : "aragain_falls", "name" : "Aragain Falls",
+        "dynamicDescription" : () => {
+            var text = "You are at the top of Aragain Falls, an enormous waterfall with a
+drop of about 450 feet. The only path here is on the north end.";
+            text &= NEWLINE & ( gameState.flags.rainbowFlag ?
+                "A solid rainbow spans the falls." :
+                "A beautiful rainbow can be seen over the falls and to the west." );
+            return text;
+        },
+        "exits" : {
+            "west" : { "to" : "on_rainbow", "requiresFlag" : "rainbowFlag" },
+            "down" : { "blocked" : "It's a long way..." },
+            "north" : "shore",
+            "up" : { "to" : "on_rainbow", "requiresFlag" : "rainbowFlag" }
+        }
+    },
+    "on_rainbow" : {
+        "id" : "on_rainbow", "name" : "On the Rainbow",
+        "description" :
+"You are on top of a rainbow (I bet you never thought you would walk
+on a rainbow), with a magnificent view of the Falls. The rainbow
+travels east-west here.",
+        "exits" : { "west" : "end_of_rainbow", "east" : "aragain_falls" }
+    },
+    "end_of_rainbow" : {
+        "id" : "end_of_rainbow", "name" : "End of Rainbow",
+        "description" :
+"You are on a small, rocky beach on the continuation of the Frigid
+River past the Falls. The beach is narrow due to the presence of the
+White Cliffs. The river canyon opens here and sunlight shines in
+from above. A rainbow crosses over the falls to the east and a narrow
+path continues to the southwest.",
+        "exits" : {
+            "up" : { "to" : "on_rainbow", "requiresFlag" : "rainbowFlag" },
+            "ne" : { "to" : "on_rainbow", "requiresFlag" : "rainbowFlag" },
+            "east" : { "to" : "on_rainbow", "requiresFlag" : "rainbowFlag" },
+            "sw" : "canyon_bottom"
+        }
+    },
+    "canyon_bottom" : {
+        "id" : "canyon_bottom", "name" : "Canyon Bottom",
+        "description" :
+"You are beneath the walls of the river canyon which may be climbable
+here. The lesser part of the runoff of Aragain Falls flows by below.
+To the north is a narrow path.",
+        "exits" : { "up" : "cliff_middle", "north" : "end_of_rainbow" }
+    },
+    "cliff_middle" : {
+        "id" : "cliff_middle", "name" : "Rocky Ledge",
+        "description" :
+"You are on a ledge about halfway up the wall of the river canyon.
+You can see from here that the main flow from Aragain Falls twists
+along a passage which it is impossible for you to enter. Below you is the
+canyon bottom. Above you is more cliff, which appears
+climbable.",
+        "exits" : { "up" : "canyon_view", "down" : "canyon_bottom" }
+    },
+    "canyon_view" : {
+        "id" : "canyon_view", "name" : "Canyon View",
+        "description" :
+"You are at the top of the Great Canyon on its west wall. From here
+there is a marvelous view of the canyon and parts of the Frigid River
+upstream. Across the canyon, the walls of the White Cliffs join the
+mighty ramparts of the Flathead Mountains to the east. Following the
+Canyon upstream to the north, Aragain Falls may be seen, complete with
+rainbow. The mighty Frigid River flows out from a great dark cavern. To
+the west and south can be seen an immense forest, stretching for miles
+around. A path leads northwest. It is possible to climb down into
+the canyon from here.",
+        "exits" : {
+            "east" : "cliff_middle", "down" : "cliff_middle", "nw" : "clearing", "west" : "forest_3",
+            "south" : { "blocked" : "Storm-tossed trees block your way." }
+        }
+    },
+
+    // --- Coal mine area ---------------------------------------------------------
+
+    "mine_entrance" : {
+        "id" : "mine_entrance", "name" : "Mine Entrance",
+        "description" :
+"You are standing at the entrance of what might have been a coal mine.
+The shaft enters the west wall, and there is another exit on the south
+end of the room.",
+        "exits" : { "south" : "slide_room", "in" : "squeaky_room", "west" : "squeaky_room" }
+    },
+    "squeaky_room" : {
+        "id" : "squeaky_room", "name" : "Squeaky Room",
+        "description" :
+"You are in a small room. Strange squeaky sounds may be heard coming
+from the passage at the north end. You may also escape to the east.",
+        "exits" : { "north" : "bat_room", "east" : "mine_entrance" }
+    },
+    "bat_room" : {
+        "id" : "bat_room", "name" : "Bat Room",
+        // BATS-ROOM's vampire-bat encounter (teleports you elsewhere unless
+        // carrying garlic) is part of Task 6, not implemented here.
+        "description" : "You are in a small room which has doors only to the east and south.",
+        "exits" : { "south" : "squeaky_room", "east" : "shaft_room" }
+    },
+    "shaft_room" : {
+        "id" : "shaft_room", "name" : "Shaft Room",
+        "description" :
+"This is a large room, in the middle of which is a small shaft
+descending through the floor into darkness below. To the west and
+the north are exits from this room. Constructed over the top of the
+shaft is a metal framework to which a heavy iron chain is attached.",
+        "exits" : { "down" : { "blocked" : "You wouldn't fit and would die if you could." }, "west" : "bat_room", "north" : "smelly_room" }
+    },
+    "smelly_room" : {
+        "id" : "smelly_room", "name" : "Smelly Room",
+        "description" :
+"This is a small nondescript room. However, from the direction
+of a small descending staircase a foul odor can be detected. To the
+south is a narrow tunnel.",
+        "exits" : { "down" : "gas_room", "south" : "shaft_room" }
+    },
+    "gas_room" : {
+        "id" : "gas_room", "name" : "Gas Room",
+        // BOOM-ROOM's open-flame explosion hazard is Task 6.
+        "description" :
+"This is a small room which smells strongly of coal gas. There is a
+short climb up some stairs and a narrow tunnel leading east.",
+        "exits" : { "up" : "smelly_room", "east" : "mine_1" }
+    },
+    "ladder_top" : {
+        "id" : "ladder_top", "name" : "Ladder Top",
+        "description" :
+"This is a very small room. In the corner is a rickety wooden
+ladder, leading downward. It might be safe to descend. There is
+also a staircase leading upward.",
+        "exits" : { "down" : "ladder_bottom", "up" : "mine_4" }
+    },
+    "ladder_bottom" : {
+        "id" : "ladder_bottom", "name" : "Ladder Bottom",
+        "description" :
+"This is a rather wide room. On one side is the bottom of a
+narrow wooden ladder. To the west and the south are passages
+leaving the room.",
+        "exits" : { "south" : "dead_end_5", "west" : "timber_room", "up" : "ladder_top" }
+    },
+    "dead_end_5" : {
+        "id" : "dead_end_5", "name" : "Dead End",
+        "description" : "You have come to a dead end in the mine.",
+        "exits" : { "north" : "ladder_bottom" }
+    },
+    "timber_room" : {
+        "id" : "timber_room", "name" : "Timber Room",
+        "description" :
+"This is a long and narrow passage, which is cluttered with broken
+timbers. A wide passage comes from the east and turns at the
+west end of the room into a very narrow passageway. From the west
+comes a strong draft.",
+        "exits" : {
+            "east" : "ladder_bottom",
+            // Simplified from the real rule (no single carried item over
+            // weight 4) to literally empty-handed — no weight system yet.
+            "west" : { "to" : "lower_shaft", "requiresEmptyHanded" : true, "blockedMessage" : "You cannot fit through this passage with that load." }
+        }
+    },
+    "lower_shaft" : {
+        "id" : "lower_shaft", "name" : "Drafty Room",
+        "description" :
+"This is a small drafty room in which is the bottom of a long
+shaft. To the south is a passageway and to the east a very narrow
+passage. In the shaft can be seen a heavy iron chain.",
+        "exits" : {
+            "south" : "machine_room",
+            "out"  : { "to" : "timber_room", "requiresEmptyHanded" : true, "blockedMessage" : "You cannot fit through this passage with that load." },
+            "east" : { "to" : "timber_room", "requiresEmptyHanded" : true, "blockedMessage" : "You cannot fit through this passage with that load." }
+        }
+    },
+    "machine_room" : {
+        "id" : "machine_room", "name" : "Machine Room",
+        "dynamicDescription" : (allObjects) => {
+            var lidState = allObjects.machine.open ? "open." : "closed.";
+            return "This is a large, cold room whose sole exit is to the north. In one
+corner there is a machine which is reminiscent of a clothes
+dryer. On its face is a switch which is labelled ""START"".
+The switch does not appear to be manipulable by any human hand (unless the
+fingers are about 1/16 by 1/4 inch). On the front of the machine is a large
+lid, which is " & lidState;
+        },
+        "exits" : { "north" : "lower_shaft" }
+    },
+
+    // --- Coal mine ---------------------------------------------------------------
+
+    "mine_1" : {
+        "id" : "mine_1", "name" : "Coal Mine",
+        "description" : "This is a nondescript part of a coal mine.",
+        "exits" : { "north" : "gas_room", "east" : "mine_1", "ne" : "mine_2" }
+    },
+    "mine_2" : {
+        "id" : "mine_2", "name" : "Coal Mine",
+        "description" : "This is a nondescript part of a coal mine.",
+        "exits" : { "north" : "mine_2", "south" : "mine_1", "se" : "mine_3" }
+    },
+    "mine_3" : {
+        "id" : "mine_3", "name" : "Coal Mine",
+        "description" : "This is a nondescript part of a coal mine.",
+        "exits" : { "south" : "mine_3", "sw" : "mine_4", "east" : "mine_2" }
+    },
+    "mine_4" : {
+        "id" : "mine_4", "name" : "Coal Mine",
+        "description" : "This is a nondescript part of a coal mine.",
+        "exits" : { "north" : "mine_3", "west" : "mine_4", "down" : "ladder_top" }
+    },
+    "slide_room" : {
+        "id" : "slide_room", "name" : "Slide Room",
+        "description" :
+"This is a small chamber, which appears to have been part of a
+coal mine. On the south wall of the chamber the letters ""Granite
+Wall"" are etched in the rock. To the east is a long passage, and
+there is a steep metal slide twisting downward. To the north is
+a small opening.",
+        "exits" : { "east" : "cold_passage", "north" : "mine_entrance", "down" : "cellar" }
+    }
+};
+
+startRoomId = "west_of_house";

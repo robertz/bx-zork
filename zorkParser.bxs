@@ -1,0 +1,1485 @@
+// BoxLang Zork-style command parser/engine.
+// Pipeline: tokenize -> classify -> grammar match -> resolve against scope -> dispatch.
+
+include "zorkData.bxs";
+
+NEWLINE = "
+";
+
+NOISE_WORDS = [ "a", "an", "the" ];
+
+// Words that split a two-object sentence ("put X in Y", "give X to Y") into
+// its direct and indirect object phrases. Several of these double as
+// DIRECTION_WORDS ("in", "on" isn't, but "in"/"out" are); that's fine —
+// extractVerb()/processCommand only consult DIRECTION_WORDS for a bare
+// leading direction or after "go", so there's no ambiguity in practice.
+PREPOSITION_WORDS = [ "in", "into", "on", "onto", "under", "behind", "with", "to", "from", "through", "at", "off" ];
+
+DIRECTION_WORDS = {
+    "north" : "north", "n" : "north",
+    "south" : "south", "s" : "south",
+    "east"  : "east",  "e" : "east",
+    "west"  : "west",  "w" : "west",
+    "ne" : "ne", "northeast" : "ne",
+    "nw" : "nw", "northwest" : "nw",
+    "se" : "se", "southeast" : "se",
+    "sw" : "sw", "southwest" : "sw",
+    "up" : "up", "u" : "up",
+    "down" : "down", "d" : "down",
+    "in" : "in", "enter" : "in",
+    "out" : "out", "exit" : "out"
+};
+
+// Verbs taking no object at all.
+ZERO_OBJECT_VERBS = [ "look", "inventory", "pray", "score", "diagnose", "listen", "launch", "odysseus" ];
+
+// Verbs taking exactly one object (an empty noun phrase is an error, except
+// "smell" which is handled separately since it's valid with or without one).
+ONE_OBJECT_VERBS = [
+    "examine", "take", "drop", "open", "close", "read", "drink", "climb",
+    "wave", "ring", "wind", "push", "board", "search", "light", "extinguish",
+    "turn_on", "turn_off"
+];
+
+// Verbs taking a direct object and an optional/required indirect object,
+// split out of the sentence at the first matching preposition (ZIL's
+// grammar table pins one specific preposition per verb; this matches that).
+TWO_OBJECT_VERBS = {
+    "give"    : { "prepositions" : [ "to" ],                      "requireSecond" : true,  "prompt" : "Give it to whom?" },
+    "put"     : { "prepositions" : [ "in", "into", "on", "onto" ], "requireSecond" : true,  "prompt" : "Put it in or on what?" },
+    "tie"     : { "prepositions" : [ "to" ],                      "requireSecond" : true,  "prompt" : "Tie it to what?" },
+    "unlock"  : { "prepositions" : [ "with" ],                    "requireSecond" : false },
+    "lock"    : { "prepositions" : [ "with" ],                    "requireSecond" : false },
+    "pour"    : { "prepositions" : [ "on", "onto", "in", "into" ], "requireSecond" : false },
+    "fill"    : { "prepositions" : [ "with" ],                    "requireSecond" : false },
+    "inflate" : { "prepositions" : [ "with" ],                    "requireSecond" : false },
+    "burn"    : { "prepositions" : [ "with" ],                    "requireSecond" : false },
+    "dig"     : { "prepositions" : [ "with" ],                    "requireSecond" : false },
+    "turn"    : { "prepositions" : [ "with" ],                    "requireSecond" : false },
+    "attack"  : { "prepositions" : [ "with" ],                    "requireSecond" : false }
+};
+
+VERB_SYNONYMS = {
+    "look"       : [ "look", "l" ],
+    "inventory"  : [ "inventory", "i", "inv" ],
+    "examine"    : [ "examine", "x", "inspect", "look at" ],
+    "take"       : [ "take", "get", "grab" ],
+    "drop"       : [ "drop" ],
+    "open"       : [ "open" ],
+    "close"      : [ "close", "shut" ],
+    "read"       : [ "read" ],
+    "go"         : [ "go", "walk" ],
+    "drink"      : [ "drink", "sip" ],
+    "climb"      : [ "climb", "scale" ],
+    "dig"        : [ "dig" ],
+    "pray"       : [ "pray" ],
+    "pour"       : [ "pour" ],
+    "fill"       : [ "fill" ],
+    "wave"       : [ "wave", "shake" ],
+    "ring"       : [ "ring" ],
+    "wind"       : [ "wind" ],
+    "tie"        : [ "tie", "attach" ],
+    "inflate"    : [ "inflate" ],
+    "board"      : [ "board" ],
+    "launch"     : [ "launch" ],
+    "unlock"     : [ "unlock" ],
+    "lock"       : [ "lock" ],
+    "push"       : [ "push", "move", "shove" ],
+    "search"     : [ "search" ],
+    "smell"      : [ "smell", "sniff" ],
+    "listen"     : [ "listen" ],
+    "diagnose"   : [ "diagnose" ],
+    "score"      : [ "score" ],
+    "odysseus"   : [ "odysseus", "ulysses" ],
+    "give"       : [ "give", "offer" ],
+    "put"        : [ "put", "place", "insert" ],
+    "attack"     : [ "attack", "kill", "hit", "fight" ],
+    "light"      : [ "light" ],
+    "burn"       : [ "burn" ],
+    "extinguish" : [ "extinguish", "douse" ],
+    "turn_on"    : [ "turn on" ],
+    "turn_off"   : [ "turn off" ],
+    "turn"       : [ "turn", "rotate" ]
+};
+
+gameState = {
+    "currentRoom" : startRoomId,
+    "turns" : 0,
+    // Mirrors the boolean globals in 1dungeon.zil/1actions.zil that gate
+    // exits. All default false (their ZIL default), and get flipped either
+    // here (rugMoved, domeFlag, lowTide — Task 3's simple single-trigger
+    // mechanics) or by puzzle logic that isn't implemented yet (tracked
+    // separately) — until then, every exit depending on one of those stays
+    // realistically blocked, exactly like a fresh game in progress.
+    "flags" : {
+        "wonFlag"       : false, // all treasures deposited -> endgame barrow
+        "trollFlag"     : false, // troll killed
+        "lowTide"       : false, // reservoir drained via the dam control bolt
+        "cyclopsFlag"   : false, // cyclops has fled
+        "magicFlag"     : false, // exorcism ceremony completed
+        "lldFlag"       : false, // ghosts banished from Hades gate
+        "coffinCure"    : false, // curse of the coffin lifted via prayer
+        "domeFlag"      : false, // rope tied to the dome railing
+        "rainbowFlag"   : false, // rainbow made solid via the sceptre
+        "grateRevealed" : false, // grating spotted from below in the maze
+        "rugMoved"      : false  // rug pushed aside, revealing the trap door
+    },
+    // Combat (FIGHT-STRENGTH's P?STRENGTH adjustment on the player —
+    // negative while wounded, recovering over time in real ZIL via the
+    // I-CURE demon; here it just stays put between fights since there's no
+    // turn-based healing demon implemented).
+    "playerStrengthAdjustment" : 0,
+    "playerDead" : false
+};
+
+function buildVerbIndex() {
+    var index = {};
+    for ( var canonical in VERB_SYNONYMS ) {
+        for ( var synonym in VERB_SYNONYMS[ canonical ] ) {
+            index[ synonym ] = canonical;
+        }
+    }
+    return index;
+}
+
+function buildVocabulary(allObjects) {
+    var nounIndex = {};
+    var adjectiveIndex = {};
+    for ( var objectId in allObjects ) {
+        var obj = allObjects[ objectId ];
+        for ( var synonym in obj.synonyms ) {
+            var word = synonym.lcase();
+            if ( !nounIndex.keyExists( word ) ) {
+                nounIndex[ word ] = [];
+            }
+            nounIndex[ word ].append( objectId );
+        }
+        for ( var adjective in obj.adjectives ) {
+            var adjWord = adjective.lcase();
+            if ( !adjectiveIndex.keyExists( adjWord ) ) {
+                adjectiveIndex[ adjWord ] = [];
+            }
+            adjectiveIndex[ adjWord ].append( objectId );
+        }
+    }
+    return { "nouns" : nounIndex, "adjectives" : adjectiveIndex };
+}
+
+VERB_INDEX  = buildVerbIndex();
+VOCABULARY  = buildVocabulary( objects );
+
+function tokenize(input) {
+    return reMatch( "[a-zA-Z']+", input.lcase() );
+}
+
+// Grammar match: pulls the verb off the front of a noise-stripped word
+// list. Tries a two-word phrase first ("turn on", "turn off") so those
+// don't get misread as the single-word "turn" (rotate) verb.
+function extractVerb(words) {
+    if ( words.len() >= 2 ) {
+        var phrase = words[ 1 ] & " " & words[ 2 ];
+        if ( VERB_INDEX.keyExists( phrase ) ) {
+            return { "found" : true, "verb" : VERB_INDEX[ phrase ], "consumed" : 2 };
+        }
+    }
+    if ( VERB_INDEX.keyExists( words[ 1 ] ) ) {
+        return { "found" : true, "verb" : VERB_INDEX[ words[ 1 ] ], "consumed" : 1 };
+    }
+    return { "found" : false };
+}
+
+// array.slice(start, length) treats length <= 0 as "no limit" rather than
+// zero elements (verified against the BoxLang runtime), so a thin wrapper
+// is needed to get an actual empty array out of an empty range.
+function sliceWords(words, start, count) {
+    return count > 0 ? words.slice( start, count ) : [];
+}
+
+// Objects visible/reachable right now: things located in the current room,
+// things carried, the (open or transparent) contents of either, plus any
+// scenery objects that declare the current room in their globalIn list.
+function getVisibleObjectIds(currentRoomId) {
+    var visible = [];
+
+    function addContainerContents(containerId) {
+        var container = objects[ containerId ];
+        if ( !( container.container && ( container.open || container.transparent ) ) ) {
+            return;
+        }
+        for ( var objectId in objects ) {
+            if ( objects[ objectId ].location == containerId && !objects[ objectId ].hidden ) {
+                visible.append( objectId );
+                addContainerContents( objectId );
+            }
+        }
+    }
+
+    for ( var objectId in objects ) {
+        var obj = objects[ objectId ];
+        if ( obj.hidden ) {
+            continue;
+        }
+        if ( obj.location == currentRoomId || obj.location == "player" ) {
+            visible.append( objectId );
+            addContainerContents( objectId );
+        } else if ( obj.globalIn.contains( currentRoomId ) ) {
+            visible.append( objectId );
+        }
+    }
+
+    return visible;
+}
+
+function article(name) {
+    var vowels = [ "a", "e", "i", "o", "u" ];
+    return vowels.contains( name.left( 1 ).lcase() ) ? "an" : "a";
+}
+
+// Resolves a noun phrase (verb already stripped) against the player's
+// current scope. Returns either an object id (string) or a struct
+// { "error" : "message" } if resolution failed.
+function resolveObject(words, currentRoomId) {
+    var meaningful = words.filter( (w) => !NOISE_WORDS.contains( w ) );
+    if ( meaningful.isEmpty() ) {
+        return { "error" : "Be more specific." };
+    }
+
+    var headNoun = meaningful[ meaningful.len() ];
+    var requiredAdjectives = meaningful.len() > 1 ? meaningful.slice( 1, meaningful.len() - 1 ) : [];
+
+    if ( !VOCABULARY.nouns.keyExists( headNoun ) ) {
+        return { "error" : "I don't know the word ""#headNoun#""." };
+    }
+
+    var globalCandidates = VOCABULARY.nouns[ headNoun ];
+    var visibleIds = getVisibleObjectIds( currentRoomId );
+
+    var candidates = globalCandidates.filter( (id) => visibleIds.contains( id ) );
+
+    if ( requiredAdjectives.len() ) {
+        candidates = candidates.filter( (id) => {
+            var obj = objects[ id ];
+            for ( var adj in requiredAdjectives ) {
+                if ( !obj.adjectives.contains( adj ) ) {
+                    return false;
+                }
+            }
+            return true;
+        } );
+    }
+
+    if ( candidates.isEmpty() ) {
+        return { "error" : "You don't see that here." };
+    }
+    if ( candidates.len() > 1 ) {
+        return { "error" : "Which #headNoun# do you mean?" };
+    }
+
+    return candidates[ 1 ];
+}
+
+// Room "contents" are never read off a static per-room list — every object
+// carries its own authoritative `location`, so anything moved into a room
+// (dropped, stolen and stashed, knocked down from a tree...) shows up here
+// without the room definition needing to know about it.
+function describeRoom(room) {
+    var lines = [];
+    lines.append( room.name );
+    lines.append( room.keyExists( "dynamicDescription" ) ? room.dynamicDescription( objects ) : room.description );
+
+    var presentIds = objects.keyArray().filter( (id) => objects[ id ].location == room.id && !objects[ id ].scenery && !objects[ id ].hidden );
+    for ( var objectId in presentIds ) {
+        var obj = objects[ objectId ];
+        lines.append( obj.desc.len() ? obj.desc : "There is #article( obj.name )# #obj.name# here." );
+    }
+
+    return lines.toList( NEWLINE );
+}
+
+function handleLook() {
+    return describeRoom( rooms[ gameState.currentRoom ] );
+}
+
+function handleInventory() {
+    var carried = objects.keyArray().filter( (id) => objects[ id ].location == "player" );
+    if ( carried.isEmpty() ) {
+        return "You are empty-handed.";
+    }
+    var names = carried.map( (id) => objects[ id ].name );
+    return "You are carrying:" & NEWLINE & names.map( (n) => "  A " & n ).toList( NEWLINE );
+}
+
+function handleExamine(obj) {
+    var description = obj.desc.len() ? obj.desc : "There's nothing special about the #obj.name#.";
+    if ( obj.container && ( obj.open || obj.transparent ) ) {
+        var contents = objects.keyArray().filter( (id) => objects[ id ].location == obj.id );
+        if ( contents.len() ) {
+            description &= NEWLINE & "The #obj.name# contains:" & NEWLINE &
+                contents.map( (id) => "  " & objects[ id ].name ).toList( NEWLINE );
+        } else {
+            description &= NEWLINE & "The #obj.name# is empty.";
+        }
+    } else if ( obj.door ) {
+        description &= NEWLINE & ( obj.open ? "It is open." : "It is closed." );
+    }
+    return description;
+}
+
+function handleTake(obj) {
+    if ( obj.location == "player" ) {
+        return "You already have that.";
+    }
+    if ( !obj.takeable ) {
+        return obj.noTakeMessage.len() ? obj.noTakeMessage : "You can't take that.";
+    }
+    obj.location = "player";
+    return "Taken.";
+}
+
+function handleDrop(obj) {
+    if ( obj.location != "player" ) {
+        return "You don't have that.";
+    }
+    obj.location = gameState.currentRoom;
+    return "Dropped.";
+}
+
+function handleOpen(obj) {
+    if ( !obj.openable ) {
+        return obj.noOpenMessage.len() ? obj.noOpenMessage : "You can't open that.";
+    }
+    if ( obj.locked ) {
+        return "It's locked.";
+    }
+    if ( obj.open ) {
+        return "It's already open.";
+    }
+    obj.open = true;
+    if ( obj.openMessage.len() ) {
+        return obj.openMessage;
+    }
+    if ( obj.container ) {
+        var contents = objects.keyArray().filter( (id) => objects[ id ].location == obj.id );
+        if ( contents.len() ) {
+            return "Opening the #obj.name# reveals " &
+                contents.map( (id) => article( objects[ id ].name ) & " " & objects[ id ].name ).toList( ", " ) & ".";
+        }
+    }
+    return "Opened.";
+}
+
+function handleClose(obj) {
+    if ( !obj.openable ) {
+        return "You can't close that.";
+    }
+    if ( !obj.open ) {
+        return "It's already closed.";
+    }
+    obj.open = false;
+    return obj.closeMessage.len() ? obj.closeMessage : "Closed.";
+}
+
+function handleRead(obj) {
+    if ( !obj.readable ) {
+        return "There's nothing written on the #obj.name#.";
+    }
+    return obj.text;
+}
+
+function carriedIds() {
+    return objects.keyArray().filter( (id) => objects[ id ].location == "player" );
+}
+
+function handleDrink(obj) {
+    if ( !obj.drinkable ) {
+        return "You can't drink that.";
+    }
+    return "Thank you very much. I was rather thirsty (from all this talking).";
+}
+
+// ZIL distinguishes CLIMB-UP/CLIMB-DOWN by grammar; this collapses both to
+// "up" (the common case — tree, dome rope, cliffs) and just reuses the
+// normal exit machinery, so any requiresOpen/requiresFlag on that exit
+// still applies.
+function handleClimb(obj) {
+    if ( !obj.climbable ) {
+        return "You can't climb that.";
+    }
+    return handleGo( "up" );
+}
+
+function handleWave(obj) {
+    return "Nothing happens.";
+}
+
+function handleRing(obj) {
+    return "Nothing happens.";
+}
+
+function handleWind(obj) {
+    return "Nothing happens.";
+}
+
+function handleSearch(obj) {
+    return handleExamine( obj );
+}
+
+function handleSmell(name) {
+    return "You smell nothing unusual" & ( name.len() ? " about the #name#." : "." );
+}
+
+function handleListenVerb() {
+    return "You hear nothing unusual.";
+}
+
+function handlePray() {
+    return "Nothing happens.";
+}
+
+function handleDiagnose() {
+    return "You are in perfect health.";
+}
+
+function handleScore() {
+    return "Your score is #handleScoreValue()# (total of 350 points), in #gameState.turns# move(s).";
+}
+
+function handleBoard(obj) {
+    if ( ![ "inflatable_boat", "inflated_boat" ].contains( obj.id ) ) {
+        return "You can't board that.";
+    }
+    return "Sailing the boat on the river isn't implemented yet.";
+}
+
+function handleLaunch() {
+    var boatHere = [ "inflatable_boat", "inflated_boat" ].filter(
+        (id) => objects[ id ].location == gameState.currentRoom || objects[ id ].location == "player"
+    );
+    if ( boatHere.isEmpty() ) {
+        return "You don't have a boat to launch here.";
+    }
+    return "Sailing the boat on the river isn't implemented yet.";
+}
+
+// Generic scenery interaction; the rug is the one well-defined source
+// mechanic worth wiring for real (RUG-FCN's MOVE/RAISE/LIFT handling).
+function handlePush(obj) {
+    if ( obj.id == "rug" ) {
+        if ( gameState.flags.rugMoved ) {
+            return "The rug has already been moved.";
+        }
+        gameState.flags.rugMoved = true;
+        objects.trap_door.hidden = false;
+        return "With great effort, you move the rug to one side of the room, revealing a closed trap door.";
+    }
+    return "Pushing the #obj.name# doesn't seem to accomplish anything.";
+}
+
+function handleTurnOn(obj) {
+    if ( !obj.light ) {
+        return "You can't turn that on.";
+    }
+    if ( obj.on ) {
+        return "It's already on.";
+    }
+    obj.on = true;
+    return "The #obj.name# is now on.";
+}
+
+function handleExtinguish(obj) {
+    if ( !obj.light ) {
+        return "You can't turn that off.";
+    }
+    if ( !obj.on ) {
+        return "It's already off.";
+    }
+    obj.on = false;
+    return "The #obj.name# is now off.";
+}
+
+// "light X" turns on a light source, or sets fire to a burnable one —
+// mirrors how ZIL's LAMP-ON/BURN verbs overlap on the word "light".
+function handleLight(obj) {
+    if ( obj.light ) {
+        return handleTurnOn( obj );
+    }
+    if ( obj.burnable ) {
+        return handleBurn( obj, "" );
+    }
+    return "You can't light that.";
+}
+
+function findLitLightSource() {
+    var lit = carriedIds().filter( (id) => objects[ id ].light && objects[ id ].on );
+    return lit.len() ? objects[ lit[ 1 ] ] : "";
+}
+
+function handleBurn(obj, indirect) {
+    if ( !obj.burnable ) {
+        return "You can't burn that.";
+    }
+    var source = isStruct( indirect ) ? indirect : findLitLightSource();
+    if ( !isStruct( source ) ) {
+        return "You have nothing to light it with.";
+    }
+    if ( !source.light || !source.on ) {
+        return "The #source.name# isn't lit.";
+    }
+    obj.location = "";
+    return "The #obj.name# catches fire and burns up.";
+}
+
+function handleDig(obj, indirect) {
+    return "The ground is too hard to dig here.";
+}
+
+// BOLT-F: turning the dam's bolt with the wrench toggles the reservoir
+// level. Simplified to an instant flip — the real GATES-OPEN transitional
+// state and the glowing-bubble GATE-FLAG aren't modeled (see Task 6).
+function handleTurn(obj, indirect) {
+    if ( obj.id == "bolt" ) {
+        if ( !isStruct( indirect ) || indirect.id != "wrench" ) {
+            return "You'll need the wrench to turn the bolt.";
+        }
+        if ( indirect.location != "player" ) {
+            return "You don't have the wrench.";
+        }
+        gameState.flags.lowTide = !gameState.flags.lowTide;
+        return gameState.flags.lowTide ?
+            "You hear a rumbling sound in the distance as the sluice gates open and the water level begins to drop." :
+            "You hear a rumbling sound in the distance as the sluice gates close.";
+    }
+    return "Turning the #obj.name# doesn't seem to accomplish anything.";
+}
+
+// ---------------------------------------------------------------------
+// Combat (ported from DO-FIGHT/VILLAIN-BLOW/HERO-BLOW/VILLAIN-STRENGTH in
+// 1actions.zil). Faithful to the real strength tables, weapon-advantage
+// rule, and per-villain message tables. Simplified: no demon/interrupt
+// queue, so each "attack" command resolves one full exchange (your blow,
+// then the villain's blow back) synchronously instead of being spread
+// across the real game's per-turn demon ticks; the troll's 33% chance to
+// hold off before his first counter-attack, the brief extra "sitting duck"
+// follow-up swing right after a foe wakes from unconsciousness, and the
+// player's slow natural healing between fights (I-CURE) aren't modeled.
+// ---------------------------------------------------------------------
+
+BLOW_MISSED         = 1;
+BLOW_UNCONSCIOUS    = 2;
+BLOW_KILLED         = 3;
+BLOW_LIGHT_WOUND    = 4;
+BLOW_SERIOUS_WOUND  = 5;
+BLOW_STAGGER        = 6;
+BLOW_LOSE_WEAPON    = 7;
+
+DEF1  = [ 1,1,1,1, 6,6, 2,2, 3,3,3,3,3 ];
+DEF2A = [ 1,1,1,1,1, 6,6, 4,4, 2 ];
+DEF2B = [ 1,1,1, 6,6, 4,4,4, 2, 3,3,3 ];
+DEF3A = [ 1,1,1,1,1, 6,6, 4,4, 5,5 ];
+DEF3B = [ 1,1,1, 6,6, 4,4,4, 5,5,5 ];
+DEF3C = [ 1, 6,6, 4,4,4,4, 5,5,5 ];
+
+// DEF1-RES/DEF2-RES/DEF3-RES: ZIL selects a 9-entry "window" into one of
+// these base tables, sliding the window toward worse outcomes as the
+// attacker's relative advantage increases (REST by 2, then by 4).
+DEF1_RES = [ DEF1, DEF1.slice( 3 ), DEF1.slice( 5 ) ];
+DEF2_RES = [ DEF2A, DEF2B, DEF2B.slice( 3 ), DEF2B.slice( 5 ) ];
+DEF3_RES = [ DEF3A, DEF3A.slice( 3 ), DEF3B, DEF3B.slice( 3 ), DEF3C ];
+
+STRENGTH_MIN = 2;
+STRENGTH_MAX = 7;
+SCORE_MAX    = 350;
+
+VILLAIN_CONFIG = {
+    "troll"   : { "bestWeapon" : "sword", "bestWeaponAdvantage" : 1, "messages" : "TROLL_MELEE" },
+    "thief"   : { "bestWeapon" : "rusty_knife", "bestWeaponAdvantage" : 1, "messages" : "THIEF_MELEE" },
+    "cyclops" : { "bestWeapon" : "", "bestWeaponAdvantage" : 0, "messages" : "CYCLOPS_MELEE" }
+};
+
+// FIGHT-STRENGTH: grows with score (treasures found), 2..7, plus the
+// player's current wound adjustment (negative while hurt).
+function fightStrength(adjust = true) {
+    var s = STRENGTH_MIN + int( handleScoreValue() / ( SCORE_MAX / ( STRENGTH_MAX - STRENGTH_MIN ) ) );
+    return adjust ? s + gameState.playerStrengthAdjustment : s;
+}
+
+function handleScoreValue() {
+    var deposited = objects.keyArray().filter( (id) => objects[ id ].location == "trophy_case" );
+    var points = 0;
+    for ( var id in deposited ) {
+        points += objects[ id ].treasureValue;
+    }
+    return points;
+}
+
+// VILLAIN-STRENGTH: the villain's current defense, reduced if the
+// attacking weapon is their one weakness (sword vs. troll, knife vs. thief).
+function villainStrength(villainId, weaponId) {
+    var def = objects[ villainId ].strength;
+    if ( def < 0 ) {
+        return def;
+    }
+    var config = VILLAIN_CONFIG[ villainId ];
+    if ( weaponId.len() && weaponId == config.bestWeapon ) {
+        def -= config.bestWeaponAdvantage;
+        if ( def < 1 ) {
+            def = 1;
+        }
+    }
+    return def;
+}
+
+// Picks a result table by defender strength, then a 1-of-9 random outcome
+// from the appropriate "window" into it — exactly VILLAIN-BLOW/HERO-BLOW's
+// branching (DEF==1 / DEF==2 / DEF>2 cases).
+function resolveBlowOutcome(attIn, defIn) {
+    var att = attIn;
+    var table = "";
+    if ( defIn == 1 ) {
+        if ( att > 2 ) {
+            att = 3;
+        }
+        table = DEF1_RES[ att ];
+    } else if ( defIn == 2 ) {
+        if ( att > 3 ) {
+            att = 4;
+        }
+        table = DEF2_RES[ att ];
+    } else {
+        att -= defIn;
+        if ( att < -1 ) {
+            att = -2;
+        } else if ( att > 1 ) {
+            att = 2;
+        }
+        table = DEF3_RES[ att + 3 ];
+    }
+    var roll = randRange( 1, min( table.len(), 9 ) );
+    var outcome = table[ roll ];
+    // LOSE-WEAPON is a 25% override of a STAGGER roll, never its own table entry.
+    if ( outcome == BLOW_STAGGER && randRange( 1, 100 ) <= 25 ) {
+        return BLOW_LOSE_WEAPON;
+    }
+    return outcome;
+}
+
+function carriedWeapon() {
+    var weapons = carriedIds().filter( (id) => objects[ id ].weapon );
+    return weapons.len() ? objects[ weapons[ 1 ] ] : "";
+}
+
+// REMARK: substitutes the weapon name into a message template (villain
+// name is baked directly into the source text in 1actions.zil, so only the
+// weapon placeholder needs handling here).
+function remark(template, weaponName) {
+    return template.replaceNoCase( "{weapon}", weaponName.len() ? weaponName : "bare hands", "all" );
+}
+
+HERO_MELEE = {
+    "1" : [ "Your {weapon} misses the {target} by an inch.",
+            "A good slash, but it misses the {target} by a mile.",
+            "You charge, but the {target} jumps nimbly aside.",
+            "Clang! Crash! The {target} parries.",
+            "A quick stroke, but the {target} is on guard.",
+            "A good stroke, but it's too slow; the {target} dodges." ],
+    "2" : [ "Your {weapon} crashes down, knocking the {target} into dreamland.",
+            "The {target} is battered into unconsciousness.",
+            "A furious exchange, and the {target} is knocked out!",
+            "The haft of your {weapon} knocks out the {target}.",
+            "The {target} is knocked out!" ],
+    "3" : [ "It's curtains for the {target} as your {weapon} removes his head.",
+            "The fatal blow strikes the {target} square in the heart: He dies.",
+            "The {target} takes a fatal blow and slumps to the floor dead." ],
+    "4" : [ "The {target} is struck on the arm; blood begins to trickle down.",
+            "Your {weapon} pinks the {target} on the wrist, but it's not serious.",
+            "Your stroke lands, but it was only the flat of the blade.",
+            "The blow lands, making a shallow gash in the {target}'s arm!" ],
+    "5" : [ "The {target} receives a deep gash in his side.",
+            "A savage blow on the thigh! The {target} is stunned but can still fight!",
+            "Slash! Your blow lands! That one hit an artery, it could be serious!",
+            "Slash! Your stroke connects! This could be serious!" ],
+    "6" : [ "The {target} is staggered, and drops to his knees.",
+            "The {target} is momentarily disoriented and can't fight back.",
+            "The force of your blow knocks the {target} back, stunned.",
+            "The {target} is confused and can't fight back.",
+            "The quickness of your thrust knocks the {target} back, stunned." ],
+    "7" : [ "The {target}'s weapon is knocked to the floor, leaving him unarmed.",
+            "The {target} is disarmed by a subtle feint past his guard." ]
+};
+
+TROLL_MELEE = {
+    "1" : [ "The troll swings his axe, but it misses.",
+            "The troll's axe barely misses your ear.",
+            "The axe sweeps past as you jump aside.",
+            "The axe crashes against the rock, throwing sparks!" ],
+    "2" : [ "The flat of the troll's axe hits you delicately on the head, knocking you out." ],
+    "3" : [ "The troll neatly removes your head.",
+            "The troll's axe stroke cleaves you from the nave to the chops.",
+            "The troll's axe removes your head." ],
+    "4" : [ "The axe gets you right in the side. Ouch!",
+            "The flat of the troll's axe skins across your forearm.",
+            "The troll's swing almost knocks you over as you barely parry in time.",
+            "The troll swings his axe, and it nicks your arm as you dodge." ],
+    "5" : [ "The troll charges, and his axe slashes you on your {weapon} arm.",
+            "An axe stroke makes a deep wound in your leg.",
+            "The troll's axe swings down, gashing your shoulder." ],
+    "6" : [ "The troll hits you with a glancing blow, and you are momentarily stunned.",
+            "The troll swings; the blade turns on your armor but crashes broadside into your head.",
+            "You stagger back under a hail of axe strokes.",
+            "The troll's mighty blow drops you to your knees." ],
+    "7" : [ "The axe hits your {weapon} and knocks it spinning.",
+            "The troll swings, you parry, but the force of his blow knocks your {weapon} away.",
+            "The axe knocks your {weapon} out of your hand. It falls to the floor." ]
+};
+
+THIEF_MELEE = {
+    "1" : [ "The thief stabs nonchalantly with his stiletto and misses.",
+            "You dodge as the thief comes in low.",
+            "You parry a lightning thrust, and the thief salutes you with a grim nod.",
+            "The thief tries to sneak past your guard, but you twist away." ],
+    "2" : [ "Shifting in the midst of a thrust, the thief knocks you unconscious with the haft of his stiletto.",
+            "The thief knocks you out." ],
+    "3" : [ "Finishing you off, the thief inserts his blade into your heart.",
+            "The thief comes in from the side, feints, and inserts the blade into your ribs.",
+            "The thief bows formally, raises his stiletto, and with a wry grin, ends the battle and your life." ],
+    "4" : [ "A quick thrust pinks your left arm, and blood starts to trickle down.",
+            "The thief draws blood, raking his stiletto across your arm.",
+            "The stiletto flashes faster than you can follow, and blood wells from your leg.",
+            "The thief slowly approaches, strikes like a snake, and leaves you wounded." ],
+    "5" : [ "The thief strikes like a snake! The resulting wound is serious.",
+            "The thief stabs a deep cut in your upper arm.",
+            "The stiletto touches your forehead, and the blood obscures your vision.",
+            "The thief strikes at your wrist, and suddenly your grip is slippery with blood." ],
+    "6" : [ "The butt of his stiletto cracks you on the skull, and you stagger back.",
+            "The thief rams the haft of his blade into your stomach, leaving you out of breath.",
+            "The thief attacks, and you fall back desperately." ],
+    "7" : [ "A long, theatrical slash. You catch it on your {weapon}, but the thief twists his knife, and the {weapon} goes flying.",
+            "The thief neatly flips your {weapon} out of your hands, and it drops to the floor.",
+            "You parry a low thrust, and your {weapon} slips out of your hand." ]
+};
+
+CYCLOPS_MELEE = {
+    "1" : [ "The Cyclops misses, but the backwash almost knocks you over.",
+            "The Cyclops rushes you, but runs into the wall." ],
+    "2" : [ "The Cyclops sends you crashing to the floor, unconscious." ],
+    "3" : [ "The Cyclops breaks your neck with a massive smash." ],
+    "4" : [ "A quick punch, but it was only a glancing blow.",
+            "A glancing blow from the Cyclops' fist." ],
+    "5" : [ "The monster smashes his huge fist into your chest, breaking several ribs.",
+            "The Cyclops almost knocks the wind out of you with a quick punch." ],
+    "6" : [ "The Cyclops lands a punch that knocks the wind out of you.",
+            "Heedless of your weapons, the Cyclops tosses you against the rock wall of the room." ],
+    "7" : [ "The Cyclops grabs your {weapon}, tastes it, and throws it to the ground in disgust.",
+            "The monster grabs you on the wrist, squeezes, and you drop your {weapon} in pain." ]
+};
+
+MELEE_TABLES = { "TROLL_MELEE" : TROLL_MELEE, "THIEF_MELEE" : THIEF_MELEE, "CYCLOPS_MELEE" : CYCLOPS_MELEE };
+
+function endGame(message) {
+    gameState.playerDead = true;
+    return message & NEWLINE & NEWLINE & "    ****  You have died  ****" & NEWLINE & NEWLINE & "The game is over.";
+}
+
+// Applies a blow outcome to the player; returns "" normally, or a death
+// message if it was fatal (WINNER-RESULT).
+function applyBlowToPlayer(outcome) {
+    if ( outcome == BLOW_KILLED ) {
+        gameState.playerStrengthAdjustment = -10000;
+    } else if ( outcome == BLOW_LIGHT_WOUND ) {
+        gameState.playerStrengthAdjustment -= 1;
+    } else if ( outcome == BLOW_SERIOUS_WOUND ) {
+        gameState.playerStrengthAdjustment -= 2;
+    } else if ( outcome == BLOW_LOSE_WEAPON ) {
+        var weapon = carriedWeapon();
+        if ( weapon.len() ) {
+            weapon.location = gameState.currentRoom;
+        }
+    }
+    if ( fightStrength() <= 0 ) {
+        return endGame( "It appears that that last blow was too much for you. I'm afraid you
+are dead." );
+    }
+    return "";
+}
+
+// Applies a blow outcome to a villain; returns true if the villain is now
+// dead/incapacitated (mirrors VILLAIN-RESULT's strength<=0 cleanup).
+function applyBlowToVillain(villainId, outcome) {
+    var villain = objects[ villainId ];
+    if ( outcome == BLOW_KILLED ) {
+        villain.strength = 0;
+    } else if ( outcome == BLOW_LIGHT_WOUND ) {
+        villain.strength = max( 0, villain.strength - 1 );
+    } else if ( outcome == BLOW_SERIOUS_WOUND ) {
+        villain.strength = max( 0, villain.strength - 2 );
+    } else if ( outcome == BLOW_UNCONSCIOUS ) {
+        villain.strength = -villain.strength;
+    } else if ( outcome == BLOW_LOSE_WEAPON ) {
+        var villainWeapon = objects.keyArray().filter( (id) => objects[ id ].location == villainId && objects[ id ].weapon );
+        if ( villainWeapon.len() ) {
+            objects[ villainWeapon[ 1 ] ].location = gameState.currentRoom;
+            objects[ villainWeapon[ 1 ] ].hidden = false;
+        }
+    }
+    return villain.strength <= 0;
+}
+
+// Incapacitated covers both KILLED (carcass vanishes, ZIL's VILLAIN-RESULT)
+// and UNCONSCIOUS (he's still right there, just out cold — and in the real
+// game could wake back up; not modeled here, so it's permanent).
+function onVillainDefeated(villainId, outcome) {
+    var name = objects[ villainId ].name;
+
+    if ( outcome == BLOW_UNCONSCIOUS ) {
+        if ( villainId == "troll" ) {
+            gameState.flags.trollFlag = true;
+            objects.axe.hidden = false;
+            return "An unconscious troll is sprawled on the floor. All passages
+out of the room are open.";
+        }
+        return "The #name# is knocked out cold.";
+    }
+
+    if ( villainId == "troll" ) {
+        gameState.flags.trollFlag = true;
+        objects.axe.hidden = false;
+    } else if ( villainId == "thief" ) {
+        var stash = objects.keyArray().filter( (id) => objects[ id ].location == "thief" );
+        for ( var id in stash ) {
+            objects[ id ].location = "treasure_room";
+            objects[ id ].hidden = false;
+        }
+        objects.thief.location = "";
+    }
+
+    return "Almost as soon as the #name# breathes his last breath, a cloud
+of sinister black fog envelops him, and when the fog lifts, the
+carcass has disappeared" & ( villainId == "thief" ? ", save for the loot now scattered in the Treasure Room." : "." );
+}
+
+// HERO-BLOW + VILLAIN-BLOW collapsed into one synchronous exchange: the
+// player swings first; if the villain survives and isn't staggered or
+// freshly knocked unconscious, it swings straight back in the same turn.
+function handleAttack(villain, indirect) {
+    if ( !villain.actor ) {
+        return "You can't attack the #villain.name#.";
+    }
+    if ( villain.strength <= 0 ) {
+        return "Attacking the #villain.name# is pointless.";
+    }
+
+    var weapon = isStruct( indirect ) ? indirect : carriedWeapon();
+    if ( !isStruct( weapon ) ) {
+        return "You are unarmed.";
+    }
+    if ( weapon.location != "player" ) {
+        return "You don't have that.";
+    }
+
+    var lines = [];
+
+    var att = max( 1, fightStrength() );
+    var def = villainStrength( villain.id, weapon.id );
+    var heroOutcome = resolveBlowOutcome( att, def );
+    lines.append( remark( HERO_MELEE[ heroOutcome ][ randRange( 1, HERO_MELEE[ heroOutcome ].len() ) ], weapon.name )
+        .replaceNoCase( "{target}", villain.name, "all" ) );
+
+    var villainDefeated = applyBlowToVillain( villain.id, heroOutcome );
+    if ( villainDefeated ) {
+        lines.append( onVillainDefeated( villain.id, heroOutcome ) );
+        return lines.toList( NEWLINE );
+    }
+
+    if ( heroOutcome == BLOW_STAGGER || heroOutcome == BLOW_UNCONSCIOUS ) {
+        return lines.toList( NEWLINE );
+    }
+
+    // Villain swings back.
+    var villainAtt = villainStrength( villain.id, weapon.id );
+    var playerDef = max( 0, fightStrength() );
+    if ( playerDef <= 0 ) {
+        return lines.toList( NEWLINE );
+    }
+    var villainOutcome = resolveBlowOutcome( villainAtt, playerDef );
+    var villainWeapon = carriedWeapon();
+    var messages = MELEE_TABLES[ VILLAIN_CONFIG[ villain.id ].messages ];
+    lines.append( remark( messages[ villainOutcome ][ randRange( 1, messages[ villainOutcome ].len() ) ], villainWeapon.name ) );
+
+    var deathMessage = applyBlowToPlayer( villainOutcome );
+    if ( deathMessage.len() ) {
+        lines.append( deathMessage );
+    }
+
+    return lines.toList( NEWLINE );
+}
+
+// Said in the Cyclops Room: he flees in terror at the name of his father's
+// nemesis, smashing the east wall through to the Treasure Room area (sets
+// magicFlag, which is also what unblocks Living Room's west door).
+function handleOdysseus() {
+    if ( gameState.currentRoom == "cyclops_room" && objects.cyclops.location == "cyclops_room" && !gameState.flags.cyclopsFlag ) {
+        gameState.flags.cyclopsFlag = true;
+        gameState.flags.magicFlag = true;
+        objects.cyclops.location = "";
+        return "The cyclops, hearing the name of his father's deadly nemesis, flees the room
+by knocking down the wall on the east of the room.";
+    }
+    return "Wasn't he a sailor?";
+}
+
+// ---------------------------------------------------------------------
+// Thief (ported from I-THIEF/STEAL-JUNK/ROB/DROP-JUNK in 1actions.zil).
+// Simplified to a once-per-turn tick instead of a true random walk across
+// every room each turn: a chance to relocate to a random room from a
+// curated pool of the underground (post-troll) rooms, and — if that room
+// is the player's current room — a chance to swipe one unguarded treasure
+// lying on the ground there. Doesn't model his maze-specific odds, the
+// "engrossed" combat penalty, or partial junk-dropping; loot (and the
+// stiletto/bag) all surface in the Treasure Room on death.
+// ---------------------------------------------------------------------
+
+THIEF_ROOMS = [
+    "troll_room", "ew_passage", "round_room", "deep_canyon", "damp_cave", "loud_room",
+    "ns_passage", "chasm_room", "engravings_cave", "egypt_room", "dome_room", "torch_room",
+    "north_temple", "south_temple", "dam_room", "dam_lobby", "maintenance_room",
+    "cyclops_room", "strange_passage", "gallery", "studio", "east_of_chasm", "cellar",
+    "living_room", "kitchen", "attic", "mirror_room_1", "mirror_room_2", "small_cave",
+    "tiny_cave", "cold_passage", "narrow_passage", "winding_passage", "twisting_passage",
+    "atlantis_room", "reservoir_north", "treasure_room"
+];
+
+// Returns an extra line to print after the command's own output, or "" if
+// nothing notable happened (the thief moved on unseen, as usual).
+function tickThief() {
+    if ( objects.thief.strength <= 0 ) {
+        return "";
+    }
+
+    // Only wanders off-screen — once he's sharing a room with the player
+    // (encountered, mid-theft, or mid-fight) he stays until the player
+    // leaves or he's defeated, instead of randomly vanishing mid-exchange.
+    if ( objects.thief.location != gameState.currentRoom ) {
+        if ( randRange( 1, 100 ) <= 35 ) {
+            objects.thief.location = THIEF_ROOMS[ randRange( 1, THIEF_ROOMS.len() ) ];
+        }
+        if ( objects.thief.location != gameState.currentRoom ) {
+            objects.thief.hidden = true;
+            return "";
+        }
+    }
+
+    objects.thief.hidden = false;
+
+    var loot = objects.keyArray().filter(
+        (id) => objects[ id ].location == gameState.currentRoom && objects[ id ].treasureValue > 0
+    );
+    if ( loot.len() && randRange( 1, 100 ) <= 30 ) {
+        var stolenId = loot[ randRange( 1, loot.len() ) ];
+        objects[ stolenId ].location = "thief";
+        objects[ stolenId ].hidden = true;
+        return "You suddenly notice that the #objects[ stolenId ].name# is gone.";
+    }
+
+    return "";
+}
+
+// CYCLOPS-FCN's GIVE handling: food calms him a little (flavor only here —
+// the real CYCLOWRATH anger meter isn't modeled), water puts him to sleep
+// (cyclopsFlag), anything else is rebuffed.
+function handleGiveCyclops(obj) {
+    if ( obj.id == "lunch" ) {
+        obj.location = "";
+        return "The cyclops says ""Mmm Mmm. I love hot peppers! But oh, could I use
+a drink.""";
+    }
+    if ( obj.id == "water" || ( obj.id == "bottle" && objects.water.location == "bottle" ) ) {
+        if ( gameState.flags.cyclopsFlag ) {
+            return "The cyclops is already fast asleep.";
+        }
+        objects.water.location = "";
+        objects.bottle.location = gameState.currentRoom;
+        objects.bottle.open = true;
+        gameState.flags.cyclopsFlag = true;
+        return "The cyclops takes the bottle, checks that it's open, and drinks the water.
+A moment later, he lets out a yawn that nearly blows you over, and then
+falls fast asleep (what did you put in that drink, anyway?).";
+    }
+    if ( obj.id == "garlic" ) {
+        return "The cyclops may be hungry, but there is a limit.";
+    }
+    return "The cyclops is not so stupid as to eat THAT!";
+}
+
+function handleGive(obj, indirect) {
+    if ( obj.location != "player" ) {
+        return "You don't have that.";
+    }
+    if ( indirect.id == "cyclops" ) {
+        return handleGiveCyclops( obj );
+    }
+    if ( !indirect.actor ) {
+        return "You can't give things to the #indirect.name#.";
+    }
+    if ( indirect.container && indirect.open ) {
+        obj.location = indirect.id;
+        return "Given.";
+    }
+    return "The #indirect.name# doesn't want that.";
+}
+
+function handlePut(obj, indirect) {
+    if ( obj.location != "player" ) {
+        return "You don't have that.";
+    }
+    if ( !indirect.container ) {
+        return "You can't put things in the #indirect.name#.";
+    }
+    if ( obj.id == indirect.id ) {
+        return "You can't put something inside itself.";
+    }
+    if ( indirect.openable && !indirect.open ) {
+        return "The #indirect.name# is closed.";
+    }
+    obj.location = indirect.id;
+    return "Done.";
+}
+
+// RUG-FCN's counterpart for the dome: tying the rope to the railing sets
+// domeFlag, which is what actually unblocks Dome Room's "down" exit.
+function handleTie(obj, indirect) {
+    if ( obj.id == "rope" && indirect.id == "railing" && gameState.currentRoom == "dome_room" ) {
+        gameState.flags.domeFlag = true;
+        objects.rope.location = "dome_room";
+        // Now described entirely by Dome/Torch Room's own prose (domeFlag),
+        // same pattern as trophy_case/front_door — avoid double mention.
+        objects.rope.scenery = true;
+        return "The rope is now tied to the railing, and its other end drops over the side.";
+    }
+    return "You can't tie those together.";
+}
+
+function handleUnlock(obj, indirect) {
+    if ( !obj.locked ) {
+        return "It's not locked.";
+    }
+    if ( !isStruct( indirect ) ) {
+        return "Unlock it with what?";
+    }
+    if ( indirect.location != "player" ) {
+        return "You don't have that.";
+    }
+    if ( obj.unlocksWith == indirect.id ) {
+        obj.locked = false;
+        return "Unlocked.";
+    }
+    return "The #indirect.name# doesn't fit the lock.";
+}
+
+function handleLock(obj, indirect) {
+    if ( obj.locked ) {
+        return "It's already locked.";
+    }
+    if ( !isStruct( indirect ) ) {
+        return "Lock it with what?";
+    }
+    if ( indirect.location != "player" ) {
+        return "You don't have that.";
+    }
+    if ( obj.unlocksWith == indirect.id ) {
+        obj.locked = true;
+        return "Locked.";
+    }
+    return "The #indirect.name# doesn't fit the lock.";
+}
+
+function handlePour(obj, indirect) {
+    if ( obj.location != "player" ) {
+        return "You aren't holding that.";
+    }
+    if ( !obj.drinkable ) {
+        return "You can't pour that.";
+    }
+    obj.location = gameState.currentRoom;
+    return "You pour the #obj.name# onto the ground.";
+}
+
+function handleFill(obj, indirect) {
+    if ( !obj.container ) {
+        return "You can't fill that.";
+    }
+    if ( !isStruct( indirect ) ) {
+        return "Fill it with what?";
+    }
+    if ( !indirect.drinkable ) {
+        return "You can't fill it with that.";
+    }
+    if ( indirect.location != "player" ) {
+        return "You don't have that.";
+    }
+    indirect.location = obj.id;
+    return "The #obj.name# is now full of #indirect.name#.";
+}
+
+// IBOAT-FUNCTION simplified: pumping the folded plastic boat with the pump
+// swaps it for the inflated (usable) boat. Actually sailing it on the
+// river rooms isn't implemented (Task 6).
+function handleInflate(obj, indirect) {
+    if ( obj.id != "inflatable_boat" ) {
+        return "You can't inflate that.";
+    }
+    if ( !isStruct( indirect ) || indirect.id != "pump" ) {
+        return "You'll need the pump to inflate it.";
+    }
+    if ( indirect.location != "player" ) {
+        return "You don't have the pump.";
+    }
+    var whereItWas = obj.location;
+    obj.location = "";
+    objects.inflated_boat.location = whereItWas;
+    return "The boat inflates and looks seaworthy.";
+}
+
+// Custom per-exit routines that are more than a simple flag/open check
+// (ZIL's "PER <routine>" exits). Each returns either a room id (string) on
+// success, or a struct { "blocked" : "message" } on failure.
+PER_EXITS = {
+    // GRATING-EXIT: only usable once the grate has been spotted from below,
+    // and only passable once it's been unlocked and opened.
+    "grating_exit" : () => {
+        if ( !gameState.flags.grateRevealed ) {
+            return { "blocked" : "You can't go that way." };
+        }
+        if ( !objects.grate.open ) {
+            return { "blocked" : "The grating is closed!" };
+        }
+        return "grating_room";
+    },
+    // MAZE-DIODES: one-way "diode" passages with a fixed (not random)
+    // far-side destination per source room, exactly as in 1actions.zil.
+    "maze_diodes" : () => {
+        var destinationByRoom = {
+            "maze_2"  : "maze_4",
+            "maze_7"  : "dead_end_1",
+            "maze_9"  : "maze_11",
+            "maze_12" : "maze_5"
+        };
+        println(
+"You won't be able to get back up to the tunnel you are going through
+when it gets to the next room."
+        );
+        return destinationByRoom[ gameState.currentRoom ];
+    },
+    // UP-CHIMNEY-FUNCTION: must be carrying the lamp (to see) and not much
+    // else, or you can't squeeze up the narrow chimney.
+    "up_chimney" : () => {
+        var carried = carriedIds();
+        if ( carried.isEmpty() ) {
+            return { "blocked" : "Going up empty-handed is a bad idea." };
+        }
+        if ( carried.contains( "brass_lantern" ) && carried.len() <= 2 ) {
+            return "kitchen";
+        }
+        return { "blocked" : "You can't get up there with what you're carrying." };
+    }
+};
+
+// Moves the player into a room and fires its onEnter hook (ZIL's M-ENTER),
+// e.g. GRATING-ROOM revealing the grate. Most onEnter behavior in the real
+// game is puzzle-specific and isn't implemented yet (see project tasks).
+function enterRoom(roomId) {
+    gameState.currentRoom = roomId;
+    var room = rooms[ roomId ];
+    if ( room.keyExists( "onEnter" ) ) {
+        room.onEnter();
+    }
+    return describeRoom( room );
+}
+
+function handleGo(direction) {
+    var room = rooms[ gameState.currentRoom ];
+    if ( !room.exits.keyExists( direction ) ) {
+        return "You can't go that way.";
+    }
+
+    var exit = room.exits[ direction ];
+
+    if ( isSimpleValue( exit ) ) {
+        return enterRoom( exit );
+    }
+
+    if ( exit.keyExists( "blocked" ) ) {
+        return exit.blocked;
+    }
+
+    if ( exit.keyExists( "per" ) ) {
+        var outcome = PER_EXITS[ exit.per ]();
+        return isSimpleValue( outcome ) ? enterRoom( outcome ) : outcome.blocked;
+    }
+
+    if ( exit.keyExists( "to" ) ) {
+        if ( exit.keyExists( "requiresOpen" ) && !objects[ exit.requiresOpen ].open ) {
+            return exit.keyExists( "blockedMessage" ) ? exit.blockedMessage : "You can't go that way.";
+        }
+        if ( exit.keyExists( "requiresFlag" ) && !gameState.flags[ exit.requiresFlag ] ) {
+            return exit.keyExists( "blockedMessage" ) ? exit.blockedMessage : "You can't go that way.";
+        }
+        if ( exit.keyExists( "requiresNotCarrying" ) && carriedIds().contains( exit.requiresNotCarrying ) ) {
+            return exit.keyExists( "blockedMessage" ) ? exit.blockedMessage : "You can't go that way.";
+        }
+        if ( exit.keyExists( "requiresEmptyHanded" ) && !carriedIds().isEmpty() ) {
+            return exit.keyExists( "blockedMessage" ) ? exit.blockedMessage : "You can't go that way.";
+        }
+        return enterRoom( exit.to );
+    }
+
+    return "You can't go that way.";
+}
+
+function capitalizeVerb(verb) {
+    return verb.left( 1 ).ucase() & verb.right( verb.len() - 1 );
+}
+
+function dispatchOneObjectVerb(verb, obj) {
+    switch ( verb ) {
+        case "examine":    return handleExamine( obj );
+        case "take":       return handleTake( obj );
+        case "drop":       return handleDrop( obj );
+        case "open":       return handleOpen( obj );
+        case "close":      return handleClose( obj );
+        case "read":       return handleRead( obj );
+        case "drink":      return handleDrink( obj );
+        case "climb":      return handleClimb( obj );
+        case "wave":       return handleWave( obj );
+        case "ring":       return handleRing( obj );
+        case "wind":       return handleWind( obj );
+        case "push":       return handlePush( obj );
+        case "board":      return handleBoard( obj );
+        case "search":     return handleSearch( obj );
+        case "light":      return handleLight( obj );
+        case "extinguish": return handleExtinguish( obj );
+        case "turn_on":    return handleTurnOn( obj );
+        case "turn_off":   return handleExtinguish( obj );
+    }
+    return "I don't know how to do that yet.";
+}
+
+function dispatchTwoObjectVerb(verb, restWords) {
+    var config = TWO_OBJECT_VERBS[ verb ];
+
+    var splitIndex = 0;
+    for ( var i = 1; i <= restWords.len(); i++ ) {
+        if ( config.prepositions.contains( restWords[ i ] ) ) {
+            splitIndex = i;
+            break;
+        }
+    }
+
+    var obj1Words = splitIndex > 0 ? sliceWords( restWords, 1, splitIndex - 1 ) : restWords;
+    var obj2Words = splitIndex > 0 ? sliceWords( restWords, splitIndex + 1, restWords.len() - splitIndex ) : [];
+
+    if ( obj1Words.isEmpty() ) {
+        return "#capitalizeVerb( verb )# what?";
+    }
+
+    var resolved1 = resolveObject( obj1Words, gameState.currentRoom );
+    if ( !isSimpleValue( resolved1 ) ) {
+        return resolved1.error;
+    }
+    var obj1 = objects[ resolved1 ];
+
+    var indirect = "";
+    if ( obj2Words.len() ) {
+        var resolved2 = resolveObject( obj2Words, gameState.currentRoom );
+        if ( !isSimpleValue( resolved2 ) ) {
+            return resolved2.error;
+        }
+        indirect = objects[ resolved2 ];
+    } else if ( config.requireSecond ) {
+        return config.prompt;
+    }
+
+    switch ( verb ) {
+        case "give":    return handleGive( obj1, indirect );
+        case "put":     return handlePut( obj1, indirect );
+        case "tie":     return handleTie( obj1, indirect );
+        case "unlock":  return handleUnlock( obj1, indirect );
+        case "lock":    return handleLock( obj1, indirect );
+        case "pour":    return handlePour( obj1, indirect );
+        case "fill":    return handleFill( obj1, indirect );
+        case "inflate": return handleInflate( obj1, indirect );
+        case "burn":    return handleBurn( obj1, indirect );
+        case "dig":     return handleDig( obj1, indirect );
+        case "turn":    return handleTurn( obj1, indirect );
+        case "attack":  return handleAttack( obj1, indirect );
+    }
+    return "I don't know how to do that yet.";
+}
+
+function dispatchCommand(input) {
+    var words = tokenize( input ).filter( (w) => !NOISE_WORDS.contains( w ) );
+    if ( words.isEmpty() ) {
+        return "I beg your pardon?";
+    }
+
+    if ( words.len() == 1 && DIRECTION_WORDS.keyExists( words[ 1 ] ) ) {
+        return handleGo( DIRECTION_WORDS[ words[ 1 ] ] );
+    }
+
+    var verbInfo = extractVerb( words );
+    if ( !verbInfo.found ) {
+        return "I don't understand that.";
+    }
+
+    var verb = verbInfo.verb;
+    var rest = words.len() > verbInfo.consumed ? sliceWords( words, verbInfo.consumed + 1, words.len() - verbInfo.consumed ) : [];
+
+    if ( verb == "go" ) {
+        var directionWord = rest.filter( (w) => DIRECTION_WORDS.keyExists( w ) );
+        return directionWord.len() ? handleGo( DIRECTION_WORDS[ directionWord[ 1 ] ] ) : "Go where?";
+    }
+
+    if ( ZERO_OBJECT_VERBS.contains( verb ) ) {
+        switch ( verb ) {
+            case "look":      return handleLook();
+            case "inventory": return handleInventory();
+            case "pray":      return handlePray();
+            case "score":     return handleScore();
+            case "diagnose":  return handleDiagnose();
+            case "listen":    return handleListenVerb();
+            case "launch":    return handleLaunch();
+            case "odysseus":  return handleOdysseus();
+        }
+    }
+
+    if ( verb == "smell" ) {
+        if ( rest.isEmpty() ) {
+            return handleSmell( "" );
+        }
+        var smelled = resolveObject( rest, gameState.currentRoom );
+        return isSimpleValue( smelled ) ? handleSmell( objects[ smelled ].name ) : smelled.error;
+    }
+
+    if ( TWO_OBJECT_VERBS.keyExists( verb ) ) {
+        return dispatchTwoObjectVerb( verb, rest );
+    }
+
+    if ( ONE_OBJECT_VERBS.contains( verb ) ) {
+        if ( rest.isEmpty() ) {
+            return "#capitalizeVerb( verb )# what?";
+        }
+        var resolved = resolveObject( rest, gameState.currentRoom );
+        if ( !isSimpleValue( resolved ) ) {
+            return resolved.error;
+        }
+        return dispatchOneObjectVerb( verb, objects[ resolved ] );
+    }
+
+    return "I don't know how to do that yet.";
+}
+
+function processCommand(input) {
+    if ( gameState.playerDead ) {
+        return "You are dead. The game is over.";
+    }
+
+    gameState.turns += 1;
+
+    var result = dispatchCommand( input );
+
+    var thiefNote = tickThief();
+    if ( thiefNote.len() ) {
+        result &= NEWLINE & thiefNote;
+    }
+
+    return result;
+}
+
+function runDemo() {
+    var commands = [
+        "look",
+        "open mailbox",
+        "read leaflet",
+        "take leaflet",
+        "put leaflet in mailbox",
+        "take leaflet",
+        "north",
+        "east",
+        "open window",
+        "west",
+        "close window",
+        "west",
+        "take lamp",
+        "turn on lamp",
+        "turn off lamp",
+        "light lamp",
+        "take sword",
+        "inventory",
+        "examine sword",
+        "take trophy case",
+        "push rug",
+        "open trap door",
+        "down",
+        "north",
+        "examine troll",
+        "examine axe",
+        "attack troll with sword",
+        "give leaflet to troll",
+        "smell",
+        "listen",
+        "score",
+        "diagnose",
+        "south",
+        "up",
+        "east",
+        "up",
+        "take rope",
+        "take knife",
+        "inventory",
+        "drink water",
+        "xyzzy",
+        "take",
+        "go"
+    ];
+
+    for ( var command in commands ) {
+        println( "> " & command );
+        println( processCommand( command ) );
+        println( "" );
+    }
+}
+
+function runInteractive() {
+    var reader = createObject( "java", "java.io.BufferedReader" ).init(
+        createObject( "java", "java.io.InputStreamReader" ).init( createObject( "java", "java.lang.System" ).in )
+    );
+
+    println( describeRoom( rooms[ gameState.currentRoom ] ) );
+    println( "" );
+
+    while ( true ) {
+        print( "> " );
+        var line = reader.readLine();
+        if ( isNull( line ) ) {
+            break;
+        }
+        line = line.trim();
+        if ( line.lcase() == "quit" || line.lcase() == "exit" ) {
+            break;
+        }
+        if ( line.len() == 0 ) {
+            continue;
+        }
+        println( processCommand( line ) );
+        println( "" );
+        if ( gameState.playerDead ) {
+            break;
+        }
+    }
+}
+
+cliArgs = CLIGetArgs().positionals;
+if ( cliArgs.len() && cliArgs[ 1 ] == "demo" ) {
+    runDemo();
+} else {
+    runInteractive();
+}
