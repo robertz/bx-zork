@@ -49,17 +49,6 @@ this is the long one, with pointers.
 - `pot_of_gold` (`zorkData.bxs:751`) stays hidden until that happens — never
   placed.
 
-### Coal mine area
-- `machine_switch` (`zorkData.bxs:800`) — turning it on with coal in the
-  coal room's machine should produce a `diamond` (`zorkData.bxs:806`,
-  never placed).
-- `bat` (`zorkData.bxs:769`) should swoop you to a random room unless
-  you're carrying garlic; currently inert.
-- `lowered_basket`/`raised_basket` (`zorkData.bxs:775,782`) — the
-  dumbwaiter chain-pull to swap between them isn't implemented.
-- `scarab` (`zorkData.bxs:744`) stays hidden; should be diggable with the
-  shovel.
-
 ### Egg / canary
 - `egg` (`zorkData.bxs:829`) should break (and damage any canary inside) on
   rough handling, becoming `broken_egg` (`zorkData.bxs:836`, never placed).

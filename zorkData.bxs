@@ -741,7 +741,7 @@ Warning:
         "", true,
         { "adjectives" : [ "beautiful", "carved", "jeweled" ], "size" : 8, "value" : 5, "treasureValue" : 5,
           "location" : "sandy_cave", "hidden" : true,
-          "note" : "TODO: hidden until dug up with the shovel (Task 6)." }
+          "note" : "SAND-FUNCTION: hidden until dug up with the shovel (handleDig, gameState.beachDig)." }
     ),
     "pot_of_gold" : makeObject(
         "pot_of_gold", "pot of gold", [ "pot", "gold", "treasure" ],
@@ -763,23 +763,42 @@ Warning:
         "There is an exquisite jade figurine here.", true,
         { "adjectives" : [ "exquisite", "jade" ], "size" : 10, "value" : 5, "treasureValue" : 5, "location" : "bat_room" }
     ),
+    // BAT-D: garlic keeps it pinned to the ceiling holding its nose
+    // (this is the only state you can actually read a description in —
+    // without garlic, BATS-ROOM's onEnter sweeps you away before you can
+    // look). See bat_room.onEnter in the rooms table below.
     "bat" : makeObject(
-        "bat", "bat", [ "bat", "vampire" ], "", false,
-        { "adjectives" : [ "vampire", "deranged" ], "actor" : true, "location" : "bat_room",
-          "note" : "TODO: swoops you to a random room unless you're carrying garlic (Task 6)." }
+        "bat", "bat",
+        [ "bat", "vampire" ],
+        "In the corner of the room on the ceiling is a large vampire bat who
+is obviously deranged and holding his nose.",
+        false,
+        { "adjectives" : [ "vampire", "deranged" ], "actor" : true, "location" : "bat_room" }
     ),
     "lowered_basket" : makeObject(
         "lowered_basket", "basket", [ "cage", "dumbwaiter", "basket" ],
         "From the chain is suspended a basket.", false,
         { "adjectives" : [ "lowered" ], "scenery" : true, "location" : "lower_shaft",
-          "note" : "TODO: dumbwaiter chain-pull to swap with raised_basket not implemented (Task 6)." }
+          "noTakeMessage" : "The cage is securely fastened to the iron chain.",
+          "note" : "BASKET-F: RAISE/LOWER (handleRaise/handleLower) swaps this with raised_basket between lower_shaft and shaft_room; gameState.flags.cageTop tracks which end is up. Mentioned via the rooms' dynamicDescription, not auto-listed." }
     ),
     "raised_basket" : makeObject(
         "raised_basket", "basket", [ "cage", "dumbwaiter", "basket" ],
         "At the end of the chain is a basket.", false,
         { "scenery" : true, "container" : true, "open" : true, "transparent" : true, "capacity" : 50,
           "location" : "shaft_room",
-          "note" : "TODO: dumbwaiter chain-pull to swap with lowered_basket not implemented (Task 6)." }
+          "noTakeMessage" : "The cage is securely fastened to the iron chain.",
+          "note" : "BASKET-F: RAISE/LOWER (handleRaise/handleLower) swaps this with lowered_basket between shaft_room and lower_shaft; gameState.flags.cageTop tracks which end is up. Mentioned via the rooms' dynamicDescription, not auto-listed." }
+    ),
+    // CHAIN-PSEUDO: vocabulary-only pseudo-object, visible from both ends
+    // of the dumbwaiter shaft. EXAMINE/TAKE only — RAISE/LOWER on "chain"
+    // falls through to "You can't raise/lower that." (ZIL nudges you
+    // toward the basket instead; not worth its own dispatch case here).
+    "chain" : makeObject(
+        "chain", "iron chain", [ "chain" ], "The chain secures a basket within the shaft.", false,
+        { "adjectives" : [ "heavy", "iron" ], "scenery" : true,
+          "noTakeMessage" : "The chain is secure.",
+          "globalIn" : [ "shaft_room", "lower_shaft" ] }
     ),
     "coal" : makeObject(
         "coal", "small pile of coal", [ "coal", "pile", "heap" ], "", true,
@@ -794,16 +813,20 @@ Warning:
         { "scenery" : true, "container" : true, "open" : false, "openable" : true, "capacity" : 50,
           "location" : "machine_room" }
     ),
+    // MSWITCH-FUNCTION: "turn on machine"/"turn on switch" (handleTurnOn,
+    // runCoalMachine in zorkParser.bxs) runs the machine on whatever's
+    // inside it — coal becomes the diamond below, anything else becomes
+    // worthless gunk. Requires the lid to be closed first, same as ZIL.
     "machine_switch" : makeObject(
         "machine_switch", "switch", [ "switch" ], "", false,
-        { "scenery" : true, "location" : "machine_room",
-          "note" : "TODO: turning it on with coal+coal_room.machine should produce a diamond (Task 6)." }
+        { "scenery" : true, "location" : "machine_room" }
     ),
     "diamond" : makeObject(
         "diamond", "huge diamond", [ "diamond", "treasure" ],
         "There is an enormous diamond (perfectly cut) here.", true,
         { "adjectives" : [ "huge", "enormous" ], "value" : 10, "treasureValue" : 10, "location" : "",
-          "note" : "TODO: created from coal by the machine (Task 6); not placed until then." }
+          "hidden" : true,
+          "note" : "Created from coal by the machine (runCoalMachine); not placed until then." }
     ),
 
     // --- Up a Tree -----------------------------------------------------------------
@@ -2000,18 +2023,41 @@ from the passage at the north end. You may also escape to the east.",
     },
     "bat_room" : {
         "id" : "bat_room", "name" : "Bat Room",
-        // BATS-ROOM's vampire-bat encounter (teleports you elsewhere unless
-        // carrying garlic) is part of Task 6, not implemented here.
         "description" : "You are in a small room which has doors only to the east and south.",
+        // BATS-ROOM's onEnter: without garlic, the bat sweeps you off to a
+        // random room from BAT-DROPS before you get a proper look around
+        // (FLY-ME). enterRoom() discards this hook's return value and just
+        // redescribes whatever room gameState.currentRoom ends up being, so
+        // the "swoops down"/"fweep" text is printed here directly rather
+        // than returned.
+        "onEnter" : () => {
+            if ( carriedIds().contains( "garlic" ) ) {
+                return;
+            }
+            println( "A large vampire bat, hanging from the ceiling, swoops down at you!" );
+            println( "" );
+            println( "    Fweep!    Fweep!    Fweep!" );
+            println( "" );
+            println( "The bat grabs you by the scruff of your neck and lifts you away...." );
+            println( "" );
+            var batDrops = [ "mine_1", "mine_2", "mine_3", "mine_4", "ladder_top", "ladder_bottom", "squeaky_room", "mine_entrance" ];
+            gameState.currentRoom = batDrops[ randRange( 1, batDrops.len() ) ];
+        },
         "exits" : { "south" : "squeaky_room", "east" : "shaft_room" }
     },
     "shaft_room" : {
         "id" : "shaft_room", "name" : "Shaft Room",
-        "description" :
-"This is a large room, in the middle of which is a small shaft
+        // BASKET-F: the basket is only here while CAGE-TOP is true.
+        "dynamicDescription" : () => {
+            var text = "This is a large room, in the middle of which is a small shaft
 descending through the floor into darkness below. To the west and
 the north are exits from this room. Constructed over the top of the
-shaft is a metal framework to which a heavy iron chain is attached.",
+shaft is a metal framework to which a heavy iron chain is attached.";
+            if ( gameState.flags.cageTop ) {
+                text &= NEWLINE & "At the end of the chain is a basket.";
+            }
+            return text;
+        },
         "exits" : { "down" : { "blocked" : "You wouldn't fit and would die if you could." }, "west" : "bat_room", "north" : "smelly_room" }
     },
     "smelly_room" : {
@@ -2067,10 +2113,16 @@ comes a strong draft.",
     },
     "lower_shaft" : {
         "id" : "lower_shaft", "name" : "Drafty Room",
-        "description" :
-"This is a small drafty room in which is the bottom of a long
+        // BASKET-F: the basket is only here while CAGE-TOP is false.
+        "dynamicDescription" : () => {
+            var text = "This is a small drafty room in which is the bottom of a long
 shaft. To the south is a passageway and to the east a very narrow
-passage. In the shaft can be seen a heavy iron chain.",
+passage. In the shaft can be seen a heavy iron chain.";
+            if ( !gameState.flags.cageTop ) {
+                text &= NEWLINE & "From the chain is suspended a basket.";
+            }
+            return text;
+        },
         "exits" : {
             "south" : "machine_room",
             "out"  : { "to" : "timber_room", "requiresEmptyHanded" : true, "blockedMessage" : "You cannot fit through this passage with that load." },
