@@ -57,15 +57,34 @@ as you aren't carrying the `coffin` at the time — unblocking
 `south_temple`'s `down` exit to `tiny_cave`.
 
 ### Dam / reservoir
-The bolt/wrench toggle (`handleTurn`) still flips `lowTide` instantly — the
-real `GATES-OPEN` transitional state and gate-flag bubble aren't modeled
-(`zorkData.bxs:551`), and neither is the water-level flooding timer
-(`I-MAINT-ROOM`/drowning) — both belong with the cross-cutting fuel/timer
-work. What's new: `leak` (`zorkData.bxs:608`) now appears when you push the
-`blue_button` in the Maintenance Room (`handlePush`), with the verbatim
-`BUTTON-F` burst-pipe message (pushing it again reports it jammed); `trunk`
-(`zorkData.bxs:421`) now reveals itself via the `reservoir` room's
-`onEnter` hook once `lowTide` is true.
+`leak` (`zorkData.bxs:608`) appears when you push the `blue_button` in the
+Maintenance Room (`handlePush`), with the verbatim `BUTTON-F` burst-pipe
+message (pushing it again reports it jammed); `trunk` (`zorkData.bxs:421`)
+reveals itself via the `reservoir` room's `onEnter` hook once `lowTide` is
+true.
+
+The bolt/wrench toggle is no longer an instant flip. `GATE-FLAG`
+(`gameState.flags.gateFlag`) — toggled by the Maintenance Room's
+`yellow_button`/`brown_button` — now gates whether the bolt turns at all
+("The bolt won't turn with your best effort." if not); turning it toggles
+`GATES-OPEN` (`gatesOpen`), and `lowTide` only catches up 8 turns later via
+a new `tickDam()` per-turn hook (porting `I-RFILL`/`I-REMPTY`'s delayed
+transition, not the instant flip this used to be). `dam_room`'s
+description now covers the real 4-state `lowTide`×`gatesOpen` matrix from
+`DAM-ROOM-FCN`, plus the bubble glowing while `gateFlag` is set.
+
+Pushing the blue button also starts the Maintenance Room's flood timer
+(`tickMaintRoom()`, porting `I-MAINT-ROOM`): water rises one `DROWNINGS`
+stage per turn (verbatim 9-phrase table), fully floods the room at level
+14 — permanently blocking re-entry — and drowns the player via `endGame()`
+if they're still inside when it happens. `put putty on leak` stops it
+(`fixMaintLeak()`, porting `FIX-MAINT-LEAK`); `put putty on punctured_boat`
+repairs the boat (`fixBoat()`, porting `FIX-BOAT` exactly: it moves the
+still-*deflated* `inflatable_boat` over and removes `punctured_boat` — you
+have to re-inflate it again with the pump, same as ZIL). Not modeled: the
+edge case where flooding sweeps an occupied boat over the falls
+(`I-MAINT-ROOM`'s `INFLATED-BOAT`/`VEHBIT` clause) — a narrow overlap with
+the boat/river system, left out as a documented simplification.
 
 ### Rainbow / sceptre
 `handleWave` now special-cases the `sceptre`, porting `SCEPTRE-FUNCTION`
