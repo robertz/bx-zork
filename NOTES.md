@@ -23,26 +23,26 @@ exits open, and walking in there fires the verbatim ZIL ending
 
 As each puzzle below gets implemented and starts placing/revealing its
 treasure, `TREASURE_MAX_SCORE` recomputes higher automatically — except
-`skull`, which needs an explicit removal from `UNREACHABLE_TREASURES`
-(`zorkParser.bxs:182`) once Hades exorcism is wired up, since `lldFlag`
-gating it isn't detectable from `hidden`/`location` alone.
-
-## Genuinely unimplemented
+`skull`, which needed an explicit removal from `UNREACHABLE_TREASURES`
+(`zorkParser.bxs:182`) once Hades exorcism was wired up (done — see below),
+since `lldFlag` gating it isn't detectable from `hidden`/`location` alone.
 
 ### Hades exorcism
-- `lldFlag` (`zorkParser.bxs:120`) never gets set. The EXORCISE ceremony
-  (bell/book/candles) isn't wired up — see `ghosts` (`zorkData.bxs:464`).
-  The gate to `land_of_living_dead` stays blocked (`zorkData.bxs:1669-1670`),
-  which is also why `skull` sits in `UNREACHABLE_TREASURES`
-  (`zorkParser.bxs:182`) — remove it from there once this is fixed.
-- `hot_bell` (`zorkData.bxs:316`) — the alternate state of `bell` after
-  being held over the torch — is defined but never produced; no
-  bell/torch state-swap logic exists.
+`lldFlag` is now set by the bell/book/candles ceremony, ported from
+`LLD-ROOM`'s `M-BEG` clause in `1actions.zil`. Ringing the `bell` at
+`entrance_to_hades` (`handleRing`) scares off the `ghosts` and swaps it for
+`hot_bell`, dropping any lit `candles` you're holding. Lighting the
+`candles` again and then reading the `book` there (`handleLight`/
+`handleRead`) completes the ceremony, removes the `ghosts`, and sets
+`lldFlag`, unblocking the gate to `land_of_living_dead`. `skull` has been
+removed from `UNREACHABLE_TREASURES` accordingly.
 
 ### Coffin curse
-- `coffinCure` (`zorkParser.bxs:121`) never gets set; praying doesn't lift
-  it. `egyptian_room`'s `down` exit to `tiny_cave` stays blocked
-  (`zorkData.bxs:1751`).
+`coffinCure` is now set by `pray` (`handlePray`) at `south_temple`, as long
+as you aren't carrying the `coffin` at the time — unblocking
+`south_temple`'s `down` exit to `tiny_cave`.
+
+## Genuinely unimplemented
 
 ### Dam / reservoir
 - Turning the bolt with the wrench toggles `lowTide` directly

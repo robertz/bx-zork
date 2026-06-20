@@ -313,7 +313,7 @@ No computer should be without one!""",
         "hot_bell", "red hot brass bell", [ "bell" ],
         "On the ground is a red hot bell.", false,
         { "adjectives" : [ "brass", "hot", "red", "small" ], "location" : "",
-          "note" : "TODO: alternate state of `bell` after being held over the torch; state-swap not implemented." }
+          "note" : "Alternate state of `bell` after being rung at entrance_to_hades; see handleRing()." }
     ),
     "troll" : makeObject(
         "troll", "troll", [ "troll" ],
@@ -461,7 +461,7 @@ against one wall. He is armed with a deadly stiletto.",
     "ghosts" : makeObject(
         "ghosts", "number of ghosts", [ "ghosts", "spirits", "fiends", "force" ], "", false,
         { "adjectives" : [ "invisible", "evil" ], "scenery" : true, "actor" : true, "location" : "entrance_to_hades",
-          "note" : "TODO: EXORCISE ceremony (bell/book/candles) not implemented (Task 6); lldFlag never flips." }
+          "note" : "Banished by the bell/candles/book ceremony; see handleRing()/handleLight()/handleRead() and checkHadesCeremonyProgress()/handleExorciseReading() in zorkParser.bxs." }
     ),
     "skull" : makeObject(
         "skull", "crystal skull", [ "skull", "head", "treasure" ],
