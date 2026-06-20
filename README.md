@@ -28,7 +28,8 @@ boxlang zorkParser.bxs
 boxlang zorkParser.bxs demo
 ```
 
-There's no save/load — it's a single in-memory session per process.
+If a `zork.save` file exists in the working directory, the game resumes
+from it automatically. Use `save` during play to write one.
 
 ## Commands
 
@@ -37,12 +38,13 @@ Directions: `north`/`n`, `south`/`s`, `east`/`e`, `west`/`w`, `ne`, `nw`, `se`, 
 
 | Arity | Verbs |
 |---|---|
-| No object | `look` (`l`), `inventory` (`i`/`inv`), `score`, `pray`, `diagnose`, `listen`, `launch`, `odysseus`/`ulysses` |
+| No object | `look` (`l`), `inventory` (`i`/`inv`), `score`, `pray`, `diagnose`, `listen`, `launch`, `odysseus`/`ulysses`, `save` |
 | One object | `examine`/`x`/`inspect`, `take`/`get`/`grab`, `drop`, `open`, `close`/`shut`, `read`, `drink`/`sip`, `climb`/`scale`, `wave`/`shake`, `ring`, `wind`, `push`/`move`/`shove`, `board`, `search`, `light`, `extinguish`/`douse`, `turn on`, `turn off`, `raise`/`lift`, `lower`, `rub`, `smell`/`sniff` (also works with no object) |
 | Two objects (`verb X <prep> Y`) | `give X to Y`, `put X in/into/on/onto Y`, `tie X to Y`, `unlock X with Y`, `lock X with Y`, `pour X on/onto/in/into Y`, `fill X with Y`, `inflate X with Y`, `burn X with Y`, `dig X with Y`, `turn X with Y`, `attack X with Y` |
 
-Also: `land` (come ashore while boating the river). `quit`/`exit` ends an
-interactive session.
+Also: `land` (come ashore while boating the river), `throw X` / `throw X at Y`
+(drops the object, or has the target duck — smashes the brass lantern if thrown,
+breaks the egg if thrown at anything). `quit`/`exit` ends an interactive session.
 
 ## How a command becomes a result
 
@@ -93,7 +95,8 @@ verb lookup.
 anything in the current room, anything carried, the contents of any open or
 transparent container (recursively), and any "global" scenery objects that
 list the current room in their `globalIn` (e.g. the kitchen window is
-visible from both *Behind House* and the *Kitchen*).
+visible from both *Behind House* and the *Kitchen*). In darkness, this
+collapses to carried items only — room contents are invisible and unreachable.
 
 `resolveObject()` matches a noun phrase against that scope by synonym, using
 any leading adjectives to disambiguate when a word matches more than one
@@ -157,7 +160,7 @@ puzzles set and exits/descriptions read.
 
 - **The full map**: all 110 rooms and 122 objects from `1dungeon.zil`,
   descriptions and synonyms taken verbatim.
-- **~40 verbs**, including two-object grammar (`put`/`give`/`tie`/`unlock`/...).
+- **~40 verbs**, including two-object grammar (`put`/`give`/`tie`/`unlock`/...) and `throw`/`hurl`/`chuck`/`toss` (drops the object; `throw X at villain` has them duck; object-specific overrides smash the brass lantern and break the egg).
 - **Real combat**, ported from `VILLAIN-BLOW`/`HERO-BLOW`'s actual strength
   tables and message tables — not a stub. The troll, thief, and cyclops are
   all fightable, with the cyclops's `STRENGTH 10000` making direct combat
@@ -182,18 +185,20 @@ puzzles set and exits/descriptions read.
   the river (board/launch/land, drifting, puncturing), and light source
   fuel timers (the lamp dims and burns out, candles burn down, matches
   burn for two turns each).
+- **Darkness and the grue**: rooms without a natural light source (underground
+  caves, the maze, etc.) are pitch black unless you're carrying a lit lamp,
+  candle, torch, or match. In the dark, room objects are invisible and
+  untouchable; after two turns without light the grue starts hunting you —
+  each turn a probabilistic roll can print a warning, a grue description, or
+  kill you outright, matching ZIL's `GRUE-FCN` probabilities.
+- **Save/load**: `save` writes `zork.save` to the working directory (JSON).
+  The game auto-loads it on the next interactive start.
 
 ## What's not (yet)
 
 What's left is small and tracked in detail in [NOTES.md](NOTES.md):
-- A `throw` verb doesn't exist, so nothing can ever produce `broken_lamp`
-  (a burned-out lamp just stays in place, permanently dead, instead).
 - A few ZIL-internal simplifications, called out in NOTES.md per puzzle —
-  e.g. the dam's full multi-stage `GATES-OPEN` transition and flooding
-  timer, `MIRROR-MUNG` (breaking a mirror), repairing a punctured boat
-  with putty.
-- This engine still has no darkness/visibility system at all; running out
-  of light is flavor-only and doesn't currently block anything.
+  `MIRROR-MUNG` (breaking a mirror) and repairing a punctured boat with putty.
 
 If you're picking this up: search for `TODO` and `note` in `zorkData.bxs` —
 every known gap is annotated in place rather than silently faked.
