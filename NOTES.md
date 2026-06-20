@@ -48,21 +48,29 @@ as you aren't carrying the `coffin` at the time — unblocking
 - Turning the bolt with the wrench toggles `lowTide` directly
   (`handleTurn`); the real `GATES-OPEN` transitional state and gate-flag
   bubble from the ZIL source aren't modeled (`zorkData.bxs:551`).
-- `leak` (`zorkData.bxs:611`) — meant to appear once the dam puzzle is
-  underway — is never placed.
-- `trunk` (`zorkData.bxs:426`) stays hidden forever; it should reveal once
-  the reservoir is drained.
+- `leak` (`zorkData.bxs:608`) now appears: pushing the `blue_button` in the
+  Maintenance Room (`handlePush`, `zorkParser.bxs`) reveals it with the
+  verbatim `BUTTON-F` burst-pipe message, and pushing it again reports it
+  jammed. The real water-level flooding timer (`I-MAINT-ROOM`/drowning) is
+  not modeled — that belongs with the cross-cutting fuel/timer work.
+- `trunk` (`zorkData.bxs:421`) now reveals itself via the `reservoir`
+  room's `onEnter` hook once `lowTide` is true, mirroring the
+  `dynamicDescription` pattern used by `reservoir_north`/`reservoir_south`.
 
 ### Mirror rooms
 - `mirror_1`/`mirror_2` (`zorkData.bxs:434,439`) — rubbing either should
   teleport you to the other one. Not implemented.
 
 ### Rainbow / sceptre
-- `rainbowFlag` (`zorkParser.bxs:123`) never gets set; waving the `sceptre`
-  at the falls/rainbow should set it (`zorkData.bxs:528`), making the
-  rainbow solid and crossable (`zorkData.bxs:1913-1944`).
-- `pot_of_gold` (`zorkData.bxs:751`) stays hidden until that happens — never
-  placed.
+- `handleWave` (`zorkParser.bxs`) now special-cases the `sceptre`, porting
+  `SCEPTRE-FUNCTION` verbatim: waving it at `aragain_falls` or
+  `end_of_rainbow` toggles `rainbowFlag` (`zorkParser.bxs:123`), making the
+  rainbow solid/crossable (the exits gated on `rainbowFlag` already existed,
+  `zorkData.bxs:1913-1944`); waving it again reverts it. Waving it while
+  standing `on_rainbow` drops the rainbow out from under you (`endGame`).
+- `pot_of_gold` (`zorkData.bxs:746`) is revealed the first time the sceptre
+  is waved at `end_of_rainbow`, matching the original's "a shimmering pot
+  of gold appears" text.
 
 ### Coal mine area
 - `machine_switch` (`zorkData.bxs:800`) — turning it on with coal in the
