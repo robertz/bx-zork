@@ -17,3 +17,6 @@ logs/
 # Env / local secrets
 .env
 .env.*
+
+# Save file
+zork.save
