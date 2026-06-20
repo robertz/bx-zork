@@ -114,13 +114,26 @@ afterward, or winding `broken_canary`, does nothing further.
 
 ### Mirror rooms
 `rub` is a new one-object verb (`handleRub`, `zorkParser.bxs`) wired up for
-`mirror_1`/`mirror_2` (`zorkData.bxs:431,436`): rubbing either mirror swaps
+`mirror_1`/`mirror_2` (`zorkData.bxs:441,445`): rubbing either mirror swaps
 `mirror_room_1`/`mirror_room_2`'s non-scenery contents and teleports the
 player to the other room, per `MIRROR-MIRROR` in `1actions.zil`. Not
-modeled: `MIRROR-MUNG` (breaking the mirror via MUNG/THROW/ATTACK, which
-would permanently disable the swap and dock seven years of luck) and the
-"rub with something other than your hands" tingling message, since this
-engine's `rub` grammar has no indirect object yet.
+modeled: the "rub with something other than your hands" tingling message,
+since this engine's `rub` grammar has no indirect object yet.
+
+`MIRROR-MUNG` is now implemented: ZIL routes `MUNG`/`THROW`/`ATTACK` against
+a mirror to the same breakage branch, but this engine has no `mung` verb
+and no `throw` verb yet (a separate, parallel task), so only `attack`
+(`handleAttack`, `zorkParser.bxs`) is wired — attacking `mirror_1`/`mirror_2`
+special-cases before the normal villain-combat path (mirrors aren't
+`actor`s) and sets `gameState.flags.mirrorBroken`, a single flag shared by
+both rooms since the two mirrors are a linked pair in ZIL too. Once broken:
+`handleRub` refuses the teleport ("The mirror is broken into many
+pieces."), `handleExamine` reflects the shattered state, the mirror rooms'
+descriptions append ZIL's "Unfortunately, the mirror has been destroyed by
+your recklessness." line, and repeat attacks get "Haven't you done enough
+damage already?" — all ported verbatim from `MIRROR-MIRROR`/`MIRROR-ROOM`
+in `1actions.zil`. The "seven years' supply of good luck" line is ported as
+flavor text only; this engine has no mechanical luck system to dock.
 
 ### Boat / river
 `gameState.boardedVehicle` (`zorkParser.bxs`) tracks whether the player is

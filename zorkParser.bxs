@@ -131,7 +131,8 @@ gameState = {
         "grateRevealed" : false, // grating spotted from below in the maze
         "rugMoved"      : false, // rug pushed aside, revealing the trap door
         "cageTop"       : true,  // CAGE-TOP: dumbwaiter basket currently at the shaft top
-        "songSung"      : false  // SING-SONG: canary already wound in a forest room, bauble dropped
+        "songSung"      : false, // SING-SONG: canary already wound in a forest room, bauble dropped
+        "mirrorBroken"  : false  // MIRROR-MUNG: mirror smashed, disabling MIRROR-MIRROR teleport for both rooms
     },
     // Combat (FIGHT-STRENGTH's P?STRENGTH adjustment on the player —
     // negative while wounded, recovering over time in real ZIL via the
@@ -375,6 +376,12 @@ function handleInventory() {
 }
 
 function handleExamine(obj) {
+    // MIRROR-MIRROR's LOOK-INSIDE/EXAMINE branch: reflects MIRROR-MUNG state.
+    if ( [ "mirror_1", "mirror_2" ].contains( obj.id ) ) {
+        return gameState.flags.mirrorBroken
+            ? "The mirror is broken into many pieces."
+            : "There is an ugly person staring back at you.";
+    }
     var description = obj.desc.len() ? obj.desc : "There's nothing special about the #obj.name#.";
     if ( obj.container && ( obj.open || obj.transparent ) ) {
         var contents = objects.keyArray().filter( (id) => objects[ id ].location == obj.id );
@@ -642,6 +649,9 @@ down, the songbird flies away.";
 function handleRub(obj) {
     if ( ![ "mirror_1", "mirror_2" ].contains( obj.id ) ) {
         return "Rubbing the #obj.name# doesn't seem to accomplish anything.";
+    }
+    if ( gameState.flags.mirrorBroken ) {
+        return "The mirror is broken into many pieces.";
     }
 
     var otherRoomId = obj.id == "mirror_1" ? "mirror_room_2" : "mirror_room_1";
@@ -1528,7 +1538,19 @@ carcass has disappeared" & ( villainId == "thief" ? ", save for the loot now sca
 // HERO-BLOW + VILLAIN-BLOW collapsed into one synchronous exchange: the
 // player swings first; if the villain survives and isn't staggered or
 // freshly knocked unconscious, it swings straight back in the same turn.
+// MIRROR-MUNG: attacking (MUNG/THROW/ATTACK in the original grammar — this
+// engine only has ATTACK) either mirror smashes it, permanently disabling
+// MIRROR-MIRROR's teleport for both linked rooms. No mechanical luck
+// system exists here, so "seven years of bad luck" is flavor text only.
 function handleAttack(villain, indirect) {
+    if ( [ "mirror_1", "mirror_2" ].contains( villain.id ) ) {
+        if ( gameState.flags.mirrorBroken ) {
+            return "Haven't you done enough damage already?";
+        }
+        gameState.flags.mirrorBroken = true;
+        return "You have broken the mirror. I hope you have a seven years' supply of
+good luck handy.";
+    }
     if ( !villain.actor ) {
         return "You can't attack the #villain.name#.";
     }
