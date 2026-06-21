@@ -2305,6 +2305,7 @@ function onVillainDefeated(villainId, outcome) {
         if ( villainId == "troll" ) {
             gameState.flags.trollFlag = true;
             objects.axe.hidden = false;
+            objects.troll.desc = "An unconscious troll is sprawled on the floor. All passages out of the room are open.";
             return "An unconscious troll is sprawled on the floor. All passages
 out of the room are open.";
         }
@@ -2314,6 +2315,7 @@ out of the room are open.";
     if ( villainId == "troll" ) {
         gameState.flags.trollFlag = true;
         objects.axe.hidden = false;
+        objects.troll.location = "";
     } else if ( villainId == "thief" ) {
         var stash = objects.keyArray().filter( (id) => objects[ id ].location == "thief" );
         for ( var id in stash ) {
