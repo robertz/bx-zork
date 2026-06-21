@@ -155,12 +155,20 @@ gameState = {
     // permanently flooded and can no longer be entered.
     "maintenanceFlooded" : false,
     // Combat (FIGHT-STRENGTH's P?STRENGTH adjustment on the player —
-    // negative while wounded, recovering over time in real ZIL via the
-    // I-CURE demon; here it just stays put between fights since there's no
-    // turn-based healing demon implemented).
+    // negative while wounded, recovering over time via tickCure()/CURE_WAIT,
+    // exactly like ZIL's I-CURE demon).
     "playerStrengthAdjustment" : 0,
+    // I-CURE: turns left until the next 1-point heal fires (0 = demon
+    // disabled, i.e. not currently wounded). Reset to CURE_WAIT every time
+    // a blow actually wounds the player; re-armed after each heal as long
+    // as playerStrengthAdjustment is still negative.
+    "cureTimer" : 0,
     "playerDead" : false,
     "gameWon" : false,
+    // DEATHS: successful resurrections so far (JIGS-UP). The first
+    // DEATH_LIMIT deaths cost 10 points and respawn you in Forest-1 at
+    // FIGHT-STRENGTH 1; past that, death is permanent (see endGame()).
+    "deaths" : 0,
     // BASE-SCORE: one-time points banked the moment a treasure is first
     // taken (object.value, zeroed after scoring so it can't repeat). Added
     // to the trophy case's live TVALUE total to get the real ,SCORE — see
@@ -760,8 +768,49 @@ sense it is now safe to carry it below.";
     return "Nothing happens.";
 }
 
+// V-DIAGNOSE, verbatim wording for wound severity, time-to-heal,
+// survivability, and the deaths-so-far line.
 function handleDiagnose() {
-    return "You are in perfect health.";
+    var wd = -gameState.playerStrengthAdjustment;
+    var msg = "";
+    if ( wd == 0 ) {
+        msg = "You are in perfect health.";
+    } else {
+        msg = "You have ";
+        if ( wd == 1 ) {
+            msg &= "a light wound,";
+        } else if ( wd == 2 ) {
+            msg &= "a serious wound,";
+        } else if ( wd == 3 ) {
+            msg &= "several wounds,";
+        } else {
+            msg &= "serious wounds,";
+        }
+        // CURE_WAIT*(WD-1) full heal cycles still to come, plus however
+        // many turns are left on the cycle already in progress.
+        var movesToCure = CURE_WAIT * ( wd - 1 ) + gameState.cureTimer;
+        msg &= " which will be cured after #movesToCure# moves.";
+    }
+    // RS, verbatim from V-DIAGNOSE: unadjusted base strength plus wound
+    // count (not the wound-adjusted strength fightStrength(true) gives).
+    var rs = fightStrength( false ) + wd;
+    msg &= NEWLINE & "You can ";
+    if ( rs <= 0 ) {
+        msg &= "expect death soon";
+    } else if ( rs == 1 ) {
+        msg &= "be killed by one more light wound";
+    } else if ( rs == 2 ) {
+        msg &= "be killed by a serious wound";
+    } else if ( rs == 3 ) {
+        msg &= "survive one serious wound";
+    } else {
+        msg &= "survive several wounds";
+    }
+    msg &= ".";
+    if ( gameState.deaths > 0 ) {
+        msg &= NEWLINE & "You have been killed " & ( gameState.deaths == 1 ? "once" : "twice" ) & ".";
+    }
+    return msg;
 }
 
 // V-SCORE's rank table, verbatim thresholds (out of the original 350).
@@ -1305,6 +1354,10 @@ DEF3_RES = [ DEF3A, DEF3A.slice( 3 ), DEF3B, DEF3B.slice( 3 ), DEF3C ];
 
 STRENGTH_MIN = 2;
 STRENGTH_MAX = 7;
+
+CURE_WAIT = 30; // CURE-WAIT: turns between each 1-point I-CURE heal
+DEATH_LIMIT = 2; // resurrections allowed before death becomes permanent
+SCORE_PENALTY_PER_DEATH = 10; // SCORE-UPD -10, applied on every death
 SCORE_MAX    = 350;
 
 VILLAIN_CONFIG = {
@@ -1496,9 +1549,37 @@ CYCLOPS_MELEE = {
 
 MELEE_TABLES = { "TROLL_MELEE" : TROLL_MELEE, "THIEF_MELEE" : THIEF_MELEE, "CYCLOPS_MELEE" : CYCLOPS_MELEE };
 
+// JIGS-UP, minus the south-temple/Hades "DEAD" ghost-limbo branch and the
+// full RANDOMIZE-OBJECTS treasure scatter (see NOTES.md): the first
+// DEATH_LIMIT deaths cost SCORE_PENALTY_PER_DEATH points and resurrect you
+// in Forest-1 at FIGHT-STRENGTH 1 ("can't quite fix you up completely");
+// past that, death is permanent.
 function endGame(message) {
-    gameState.playerDead = true;
-    return message & NEWLINE & NEWLINE & "    ****  You have died  ****" & NEWLINE & NEWLINE & "The game is over.";
+    gameState.baseScore -= SCORE_PENALTY_PER_DEATH;
+
+    if ( gameState.deaths >= DEATH_LIMIT ) {
+        gameState.playerDead = true;
+        return message & NEWLINE & NEWLINE & "    ****  You have died  ****" & NEWLINE & NEWLINE &
+            "You clearly are a suicidal maniac. We don't allow psychotics in the cave, since
+they may harm other adventurers. Your remains will be installed in the
+Land of the Living Dead, where your fellow adventurers may gloat over them." &
+            NEWLINE & NEWLINE & "The game is over.";
+    }
+
+    gameState.deaths += 1;
+    if ( objects.brass_lantern.location == "player" ) {
+        objects.brass_lantern.location = "living_room";
+    }
+    if ( objects.coffin.location == "player" ) {
+        objects.coffin.location = "egypt_room";
+    }
+    gameState.playerStrengthAdjustment = 1 - fightStrength( false );
+    gameState.cureTimer = gameState.playerStrengthAdjustment < 0 ? CURE_WAIT : 0;
+
+    return message & NEWLINE & NEWLINE & "    ****  You have died  ****" & NEWLINE & NEWLINE &
+        "Now, let's take a look here..." & NEWLINE &
+        "Well, you probably deserve another chance.  I can't quite fix you up completely,
+but you can't have everything." & NEWLINE & NEWLINE & enterRoom( "forest_1" );
 }
 
 function endGameWin(message) {
@@ -1671,8 +1752,10 @@ function applyBlowToPlayer(outcome) {
         gameState.playerStrengthAdjustment = -10000;
     } else if ( outcome == BLOW_LIGHT_WOUND ) {
         gameState.playerStrengthAdjustment -= 1;
+        gameState.cureTimer = CURE_WAIT;
     } else if ( outcome == BLOW_SERIOUS_WOUND ) {
         gameState.playerStrengthAdjustment -= 2;
+        gameState.cureTimer = CURE_WAIT;
     } else if ( outcome == BLOW_LOSE_WEAPON ) {
         var weapon = carriedWeapon();
         if ( weapon.len() ) {
@@ -1682,6 +1765,25 @@ function applyBlowToPlayer(outcome) {
     if ( fightStrength() <= 0 ) {
         return endGame( "It appears that that last blow was too much for you. I'm afraid you
 are dead." );
+    }
+    return "";
+}
+
+// I-CURE: heals 1 point of wound every CURE_WAIT turns, re-arming itself
+// while still wounded and going dormant (cureTimer 0) once fully healed.
+function tickCure() {
+    if ( gameState.cureTimer <= 0 ) {
+        return "";
+    }
+    gameState.cureTimer -= 1;
+    if ( gameState.cureTimer > 0 ) {
+        return "";
+    }
+    if ( gameState.playerStrengthAdjustment < 0 ) {
+        gameState.playerStrengthAdjustment += 1;
+    }
+    if ( gameState.playerStrengthAdjustment < 0 ) {
+        gameState.cureTimer = CURE_WAIT;
     }
     return "";
 }
@@ -2451,6 +2553,10 @@ function processCommand(input) {
     var matchNote = tickMatch();
     if ( matchNote.len() ) {
         result &= NEWLINE & matchNote;
+    }
+
+    if ( !gameState.playerDead ) {
+        tickCure();
     }
 
     if ( !gameState.playerDead ) {

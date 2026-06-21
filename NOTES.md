@@ -219,6 +219,43 @@ in the room instead — the gap this was tracked under is now closed; and
 `BAD-EGG`-derived `breakEgg()` helper) breaks the egg even when thrown at a
 villain, taking priority over the generic duck response for that one item.
 
+### Diagnose
+`handleDiagnose()` (`zorkParser.bxs:775`) used to just return "You are in
+perfect health." unconditionally. Now a verbatim port of `V-DIAGNOSE`'s
+full text, including the two lines that depend on the mechanics below:
+"which will be cured after N moves" (`CURE_WAIT*(WD-1) + cureTimer`) and
+"you have been killed once/twice" (`gameState.deaths`). `WD` is the wound
+count (`-playerStrengthAdjustment`), `RS` is `fightStrength(false) + WD`
+(the *unadjusted* base strength plus wound count — not the wound-adjusted
+strength `fightStrength(true)` gives; matches `V-DIAGNOSE`'s own `MS`/`WD`
+formula in `1actions.zil:3993`, odd as that addition looks).
+
+### Wound healing over time
+`tickCure()` (`zorkParser.bxs`, wired into `processCommand()`'s per-turn
+sequence) ports `I-CURE`: while `gameState.cureTimer` is running it counts
+down each turn, and on hitting 0 heals `playerStrengthAdjustment` by 1 and
+re-arms itself (`CURE_WAIT` = 30 turns) if still wounded, exactly like
+`I-CURE`'s self-requeuing `ENABLE <QUEUE I-CURE CURE-WAIT>`.
+`applyBlowToPlayer()` arms the timer the moment a blow actually wounds the
+player (light/serious wound, not stagger/disarm), matching `WINNER-RESULT`'s
+own enable condition.
+
+### Death counter / resurrection
+`endGame()` (`zorkParser.bxs`) ports `JIGS-UP`'s core resurrection loop:
+every death costs `SCORE_PENALTY_PER_DEATH` (10) points; the first
+`DEATH_LIMIT` (2) deaths respawn the player in `forest_1` at
+`FIGHT-STRENGTH` 1 ("I can't quite fix you up completely") rather than
+ending the session, and any carried `brass_lantern`/`coffin` is left behind
+in `living_room`/`egypt_room`. `gameState.deaths` tracks resurrections for
+`handleDiagnose()`; the next death after the limit is permanent, verbatim
+"suicidal maniac" ending. Deliberately *not* ported: ZIL's `south_temple`/
+`,DEAD` "ghost limbo" branch (resurrecting as a translucent, `ALWAYS-LIT`
+ghost who has to find their way back to the Hades gate to rejoin the
+living) and `RANDOMIZE-OBJECTS`'s full treasure scatter (every other
+carried treasure relocated to a random room, `sword`'s trophy value zeroed
+forever) — both are substantial separate features layered on top of the
+basic respawn, not part of "can you die and keep playing."
+
 ## Genuinely unimplemented
 
 ### Other single-item gaps
