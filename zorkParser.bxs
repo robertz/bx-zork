@@ -34,6 +34,16 @@ DIRECTION_WORDS = {
     "land" : "land"
 };
 
+// IT/HIM/HER/THEM all collapse onto the single last-referenced-object
+// pointer below — this engine has no object-gender data to split ZIL's
+// separate IT/HIM/HER parser slots on, but this covers the common case
+// ("take lamp. turn it on.").
+PRONOUNS = [ "it", "him", "her", "them" ];
+
+// ZIL's MANY/SMANY grammar bit (ALL/ALL BUT and "X and Y" object lists) is
+// per-verb; this port scopes it to the two verbs players hit it on most.
+MULTI_OBJECT_VERBS = [ "take", "drop" ];
+
 // Verbs taking no object at all.
 ZERO_OBJECT_VERBS = [ "look", "inventory", "pray", "score", "diagnose", "launch", "odysseus", "save" ];
 
@@ -195,8 +205,29 @@ gameState = {
     // GRUE-FUNCTION's turn counter: increments each turn you spend in
     // darkness, resets to 0 when you re-enter light. The grue first fires
     // after 2 dark turns (matching ZIL's INT-DEF I-GRUE delay of 2).
-    "grueCounter" : 0
+    "grueCounter" : 0,
+    // P-IT-OBJECT-equivalent: last object successfully referenced by name,
+    // for IT/HIM/HER/THEM (see PRONOUNS). lastObjectIds is the plural form,
+    // set by ALL/"X and Y" resolution (see resolveObjectGroup()).
+    "lastObjectId" : "",
+    "lastObjectIds" : [],
+    // Raw text of the last fully-dispatched command line, for AGAIN/G and
+    // for OOPS to rebuild the sentence around a corrected word.
+    "lastRawInput" : "",
+    // The most recent word that failed vocabulary lookup, so "oops <word>"
+    // knows what to replace in lastRawInput.
+    "lastUnknownWord" : "",
+    // ORPHANING/disambiguation (ZIL's GET-OBJECT/WHICH-PRINT): when a verb
+    // is missing a required object, or a noun phrase matches more than one
+    // visible object, the question is asked here and the *next* input line
+    // is consumed as the answer rather than parsed as a fresh command. See
+    // resolvePendingPromptTurn(). type == "" means no question pending.
+    "pendingPrompt" : { "type" : "" }
 };
+
+function clearPendingPrompt() {
+    gameState.pendingPrompt = { "type" : "" };
+}
 
 function buildVerbIndex() {
     var index = {};
@@ -374,16 +405,66 @@ function article(name) {
 // Resolves a noun phrase (verb already stripped) against the player's
 // current scope. Returns either an object id (string) or a struct
 // { "error" : "message" } if resolution failed.
+// Builds ZIL's "Which do you mean, the X or the Y?" disambiguation prompt.
+function buildDisambiguationQuestion(candidates) {
+    var names = candidates.map( (id) => article( objects[ id ].name ) & " " & objects[ id ].name );
+    if ( names.len() == 2 ) {
+        return "Which do you mean, #names[ 1 ]# or #names[ 2 ]#?";
+    }
+    var head = names.slice( 1, names.len() - 1 ).toList( ", " );
+    return "Which do you mean, #head#, or #names[ names.len() ]#?";
+}
+
+// Matches a disambiguation answer ("the brass one", "lamp") against the
+// candidate set by synonym/adjective word overlap.
+function matchAnswerAgainstCandidates(input, candidates) {
+    var words = tokenize( input ).filter( (w) => !NOISE_WORDS.contains( w ) );
+    if ( words.isEmpty() ) {
+        return [];
+    }
+    // Score each candidate by how many input words it matches, then return
+    // only those tied at the highest score — "trap door" beats "door" alone
+    // for trap_door vs wooden_door because "trap" gives it an extra point.
+    var scored = candidates.map( (id) => {
+        var obj = objects[ id ];
+        var lowerSynonyms = obj.synonyms.map( (s) => s.lcase() );
+        var score = 0;
+        for ( var w in words ) {
+            if ( lowerSynonyms.contains( w ) || obj.adjectives.contains( w ) ) {
+                score += 1;
+            }
+        }
+        return { "id": id, "score": score };
+    } ).filter( (entry) => entry.score > 0 );
+    if ( scored.isEmpty() ) {
+        return [];
+    }
+    var best = scored.reduce( (acc, entry) => entry.score > acc ? entry.score : acc, 0 );
+    return scored.filter( (entry) => entry.score == best ).map( (entry) => entry.id );
+}
+
 function resolveObject(words, currentRoomId) {
     var meaningful = words.filter( (w) => !NOISE_WORDS.contains( w ) );
     if ( meaningful.isEmpty() ) {
         return { "error" : "Be more specific." };
     }
 
+    // Pronoun shortcut (IT/HIM/HER/THEM) — see PRONOUNS.
+    if ( meaningful.len() == 1 && PRONOUNS.contains( meaningful[ 1 ] ) ) {
+        if ( !gameState.lastObjectId.len() ) {
+            return { "error" : "I don't know what you're referring to." };
+        }
+        if ( !getVisibleObjectIds( currentRoomId ).contains( gameState.lastObjectId ) ) {
+            return { "error" : "You don't see that here." };
+        }
+        return gameState.lastObjectId;
+    }
+
     var headNoun = meaningful[ meaningful.len() ];
     var requiredAdjectives = meaningful.len() > 1 ? meaningful.slice( 1, meaningful.len() - 1 ) : [];
 
     if ( !VOCABULARY.nouns.keyExists( headNoun ) ) {
+        gameState.lastUnknownWord = headNoun;
         return { "error" : "I don't know the word ""#headNoun#""." };
     }
 
@@ -408,10 +489,79 @@ function resolveObject(words, currentRoomId) {
         return { "error" : "You don't see that here." };
     }
     if ( candidates.len() > 1 ) {
-        return { "error" : "Which #headNoun# do you mean?" };
+        return { "error" : buildDisambiguationQuestion( candidates ), "candidates" : candidates };
     }
 
+    gameState.lastObjectId = candidates[ 1 ];
     return candidates[ 1 ];
+}
+
+// ALL/ALL BUT and "X and Y" object lists (ZIL's MANY/SMANY), scoped to
+// MULTI_OBJECT_VERBS. Returns { "ids" : [...] } on success, { "error" : msg }
+// on failure, or { "single" : true } when the words don't actually contain
+// a list — callers fall through to ordinary single-object resolution.
+function visibleAllCandidates(verb) {
+    var visibleIds = getVisibleObjectIds( gameState.currentRoom );
+    if ( verb == "drop" ) {
+        return visibleIds.filter( (id) => objects[ id ].location == "player" );
+    }
+    return visibleIds.filter( (id) => objects[ id ].takeable && objects[ id ].location != "player" );
+}
+
+function resolveObjectGroup(words, verb) {
+    if ( words.len() == 1 && words[ 1 ] == "them" && gameState.lastObjectIds.len() ) {
+        return { "ids" : gameState.lastObjectIds };
+    }
+
+    if ( words.len() && words[ 1 ] == "all" ) {
+        var excluded = [];
+        var afterAll = sliceWords( words, 2, words.len() - 1 );
+        if ( afterAll.len() >= 2 && [ "but", "except" ].contains( afterAll[ 1 ] ) ) {
+            var excludePhrase = sliceWords( afterAll, 2, afterAll.len() - 1 );
+            var excludedResolved = resolveObject( excludePhrase, gameState.currentRoom );
+            if ( isSimpleValue( excludedResolved ) ) {
+                excluded.append( excludedResolved );
+            }
+        }
+        var allIds = visibleAllCandidates( verb ).filter( (id) => !excluded.contains( id ) );
+        if ( allIds.isEmpty() ) {
+            return { "error" : verb == "drop" ? "You aren't carrying anything." : "There's nothing here to take." };
+        }
+        return { "ids" : allIds };
+    }
+
+    var groups = [];
+    var current = [];
+    for ( var w in words ) {
+        if ( w == "and" ) {
+            if ( current.len() ) {
+                groups.append( current );
+            }
+            current = [];
+        } else {
+            current.append( w );
+        }
+    }
+    if ( current.len() ) {
+        groups.append( current );
+    }
+
+    if ( groups.len() <= 1 ) {
+        return { "single" : true };
+    }
+
+    var ids = [];
+    for ( var group in groups ) {
+        var resolved = resolveObject( group, gameState.currentRoom );
+        // Ambiguity inside a multi-item list isn't resumable in this port
+        // (would need to track partially-resolved siblings); surface it as
+        // a flat failure rather than a half-wired clarifying question.
+        if ( !isSimpleValue( resolved ) ) {
+            return { "error" : resolved.error };
+        }
+        ids.append( resolved );
+    }
+    return { "ids" : ids };
 }
 
 // Room "contents" are never read off a static per-room list — every object
@@ -2753,46 +2903,7 @@ function dispatchOneObjectVerb(verb, obj) {
     return "I don't know how to do that yet.";
 }
 
-function dispatchTwoObjectVerb(verb, restWords) {
-    var config = TWO_OBJECT_VERBS[ verb ];
-
-    var splitIndex = 0;
-    for ( var i = 1; i <= restWords.len(); i++ ) {
-        if ( config.prepositions.contains( restWords[ i ] ) ) {
-            splitIndex = i;
-            break;
-        }
-    }
-
-    var obj1Words = splitIndex > 0 ? sliceWords( restWords, 1, splitIndex - 1 ) : restWords;
-    var obj2Words = splitIndex > 0 ? sliceWords( restWords, splitIndex + 1, restWords.len() - splitIndex ) : [];
-
-    if ( obj1Words.isEmpty() ) {
-        return "#capitalizeVerb( verb )# what?";
-    }
-
-    var resolved1 = resolveObject( obj1Words, gameState.currentRoom );
-    if ( !isSimpleValue( resolved1 ) ) {
-        return resolved1.error;
-    }
-    var obj1 = objects[ resolved1 ];
-
-    var indirect = "";
-    if ( obj2Words.len() == 1 && ( obj2Words[ 1 ] == "me" || obj2Words[ 1 ] == "myself" ) ) {
-        // PRSI == ME has no vocabulary entry to resolve against (there's no
-        // player object in `objects`); special-case it here so handleThrow
-        // can see a struct-shaped "it's the player" sentinel.
-        indirect = { "id" : "player", "name" : "yourself", "actor" : false };
-    } else if ( obj2Words.len() ) {
-        var resolved2 = resolveObject( obj2Words, gameState.currentRoom );
-        if ( !isSimpleValue( resolved2 ) ) {
-            return resolved2.error;
-        }
-        indirect = objects[ resolved2 ];
-    } else if ( config.requireSecond ) {
-        return config.prompt;
-    }
-
+function dispatchTwoObjectVerbCore(verb, obj1, indirect) {
     switch ( verb ) {
         case "give":    return handleGive( obj1, indirect );
         case "put":     return handlePut( obj1, indirect );
@@ -2812,6 +2923,73 @@ function dispatchTwoObjectVerb(verb, restWords) {
     return "I don't know how to do that yet.";
 }
 
+// Resolves the indirect object (if any) and dispatches. Split out of
+// dispatchTwoObjectVerb so orphaning (missing direct object) and
+// disambiguation can resume straight into this once the direct object is
+// known, without re-parsing the original sentence.
+function finishTwoObjectVerb(verb, obj1, obj2Words) {
+    var config = TWO_OBJECT_VERBS[ verb ];
+
+    var indirect = "";
+    if ( obj2Words.len() == 1 && ( obj2Words[ 1 ] == "me" || obj2Words[ 1 ] == "myself" ) ) {
+        // PRSI == ME has no vocabulary entry to resolve against (there's no
+        // player object in `objects`); special-case it here so handleThrow
+        // can see a struct-shaped "it's the player" sentinel.
+        indirect = { "id" : "player", "name" : "yourself", "actor" : false };
+    } else if ( obj2Words.len() ) {
+        var resolved2 = resolveObject( obj2Words, gameState.currentRoom );
+        if ( !isSimpleValue( resolved2 ) ) {
+            if ( resolved2.keyExists( "candidates" ) ) {
+                gameState.pendingPrompt = {
+                    "type" : "disambiguate", "verb" : verb, "resumeKind" : "twoIndirect",
+                    "directObjectId" : obj1.id, "candidates" : resolved2.candidates
+                };
+            }
+            return resolved2.error;
+        }
+        indirect = objects[ resolved2 ];
+    } else if ( config.requireSecond ) {
+        gameState.pendingPrompt = { "type" : "orphanIndirect", "verb" : verb, "directObjectId" : obj1.id };
+        return config.prompt;
+    }
+
+    return dispatchTwoObjectVerbCore( verb, obj1, indirect );
+}
+
+function dispatchTwoObjectVerb(verb, restWords) {
+    var config = TWO_OBJECT_VERBS[ verb ];
+
+    var splitIndex = 0;
+    for ( var i = 1; i <= restWords.len(); i++ ) {
+        if ( config.prepositions.contains( restWords[ i ] ) ) {
+            splitIndex = i;
+            break;
+        }
+    }
+
+    var obj1Words = splitIndex > 0 ? sliceWords( restWords, 1, splitIndex - 1 ) : restWords;
+    var obj2Words = splitIndex > 0 ? sliceWords( restWords, splitIndex + 1, restWords.len() - splitIndex ) : [];
+
+    if ( obj1Words.isEmpty() ) {
+        gameState.pendingPrompt = { "type" : "orphanOne", "verb" : verb, "kind" : "two", "obj2Words" : obj2Words };
+        return "#capitalizeVerb( verb )# what?";
+    }
+
+    var resolved1 = resolveObject( obj1Words, gameState.currentRoom );
+    if ( !isSimpleValue( resolved1 ) ) {
+        if ( resolved1.keyExists( "candidates" ) ) {
+            gameState.pendingPrompt = {
+                "type" : "disambiguate", "verb" : verb, "resumeKind" : "twoDirect", "obj2Words" : obj2Words,
+                "candidates" : resolved1.candidates
+            };
+        }
+        return resolved1.error;
+    }
+    var obj1 = objects[ resolved1 ];
+
+    return finishTwoObjectVerb( verb, obj1, obj2Words );
+}
+
 function dispatchCommand(input) {
     var words = tokenize( input ).filter( (w) => !NOISE_WORDS.contains( w ) );
     if ( words.isEmpty() ) {
@@ -2824,6 +3002,7 @@ function dispatchCommand(input) {
 
     var verbInfo = extractVerb( words );
     if ( !verbInfo.found ) {
+        gameState.lastUnknownWord = words[ 1 ];
         return "I don't understand that.";
     }
 
@@ -2869,7 +3048,13 @@ function dispatchCommand(input) {
             return "It smells like coal gas in here.";
         }
         var smelled = resolveObject( rest, gameState.currentRoom );
-        return isSimpleValue( smelled ) ? handleSmell( objects[ smelled ] ) : smelled.error;
+        if ( !isSimpleValue( smelled ) ) {
+            if ( smelled.keyExists( "candidates" ) ) {
+                gameState.pendingPrompt = { "type" : "disambiguate", "verb" : verb, "resumeKind" : "smell", "candidates" : smelled.candidates };
+            }
+            return smelled.error;
+        }
+        return handleSmell( objects[ smelled ] );
     }
 
     // "LISTEN TO/FOR OBJECT" in ZIL syntax; strip a leading "to"/"for" if
@@ -2882,7 +3067,35 @@ function dispatchCommand(input) {
             return handleListenVerb( "" );
         }
         var heard = resolveObject( listenRest, gameState.currentRoom );
-        return isSimpleValue( heard ) ? handleListenVerb( objects[ heard ] ) : heard.error;
+        if ( !isSimpleValue( heard ) ) {
+            if ( heard.keyExists( "candidates" ) ) {
+                gameState.pendingPrompt = { "type" : "disambiguate", "verb" : verb, "resumeKind" : "listen", "candidates" : heard.candidates };
+            }
+            return heard.error;
+        }
+        return handleListenVerb( objects[ heard ] );
+    }
+
+    // "turn <object> on/off" (ZIL's own SYNTAX form, object between verb and
+    // particle) — distinct from the "turn on <object>" two-word-verb form
+    // extractVerb() already catches. Needed so pronouns work here too
+    // ("take lamp. turn it on."), since the pronoun sits where extractVerb's
+    // fixed two-word lookahead can't see it.
+    if ( verb == "turn" && rest.len() && [ "on", "off" ].contains( rest[ rest.len() ] ) ) {
+        var turnVerb = rest[ rest.len() ] == "on" ? "turn_on" : "turn_off";
+        var turnObjWords = sliceWords( rest, 1, rest.len() - 1 );
+        if ( turnObjWords.isEmpty() ) {
+            gameState.pendingPrompt = { "type" : "orphanOne", "verb" : turnVerb, "kind" : "one" };
+            return "#capitalizeVerb( turnVerb )# what?";
+        }
+        var turnResolved = resolveObject( turnObjWords, gameState.currentRoom );
+        if ( !isSimpleValue( turnResolved ) ) {
+            if ( turnResolved.keyExists( "candidates" ) ) {
+                gameState.pendingPrompt = { "type" : "disambiguate", "verb" : turnVerb, "resumeKind" : "one", "candidates" : turnResolved.candidates };
+            }
+            return turnResolved.error;
+        }
+        return dispatchOneObjectVerb( turnVerb, objects[ turnResolved ] );
     }
 
     if ( TWO_OBJECT_VERBS.keyExists( verb ) ) {
@@ -2891,10 +3104,31 @@ function dispatchCommand(input) {
 
     if ( ONE_OBJECT_VERBS.contains( verb ) ) {
         if ( rest.isEmpty() ) {
+            gameState.pendingPrompt = { "type" : "orphanOne", "verb" : verb, "kind" : "one" };
             return "#capitalizeVerb( verb )# what?";
         }
+
+        if ( MULTI_OBJECT_VERBS.contains( verb ) ) {
+            var group = resolveObjectGroup( rest, verb );
+            if ( group.keyExists( "ids" ) ) {
+                gameState.lastObjectIds = group.ids;
+                var messages = [];
+                for ( var id in group.ids ) {
+                    messages.append( dispatchOneObjectVerb( verb, objects[ id ] ) );
+                }
+                return messages.toList( NEWLINE );
+            }
+            if ( group.keyExists( "error" ) ) {
+                return group.error;
+            }
+            // group.single == true: fall through to ordinary single-object resolution.
+        }
+
         var resolved = resolveObject( rest, gameState.currentRoom );
         if ( !isSimpleValue( resolved ) ) {
+            if ( resolved.keyExists( "candidates" ) ) {
+                gameState.pendingPrompt = { "type" : "disambiguate", "verb" : verb, "resumeKind" : "one", "candidates" : resolved.candidates };
+            }
             return resolved.error;
         }
         return dispatchOneObjectVerb( verb, objects[ resolved ] );
@@ -2903,21 +3137,129 @@ function dispatchCommand(input) {
     return "I don't know how to do that yet.";
 }
 
-function processCommand(input) {
-    if ( gameState.playerDead ) {
-        return "You are dead. The game is over.";
+// Resumes whatever object-targeted verb a disambiguation/orphan prompt was
+// originally raised for, once the missing/ambiguous object is known.
+function dispatchByKind(verb, kind, obj) {
+    switch ( kind ) {
+        case "smell":  return handleSmell( obj );
+        case "listen": return handleListenVerb( obj );
+        default:       return dispatchOneObjectVerb( verb, obj );
     }
-    if ( gameState.gameWon ) {
-        return "You have already won. The game is over.";
+}
+
+// Resolves a pending orphan/disambiguation question against the next input
+// line. Returns { "message", "stillPending", "executed" } — stillPending
+// means another question was raised (e.g. the answer itself was ambiguous,
+// or a two-object verb's direct object resolved but the indirect object is
+// now missing), so processCommand must not charge a turn or run the tick
+// sequence yet.
+function resolvePendingPromptTurn(input) {
+    var prompt = gameState.pendingPrompt;
+    clearPendingPrompt();
+    var resultText = "";
+
+    if ( prompt.type == "orphanOne" ) {
+        var words = tokenize( input ).filter( (w) => !NOISE_WORDS.contains( w ) );
+        if ( words.isEmpty() ) {
+            return { "message" : "Never mind.", "stillPending" : false, "executed" : false };
+        }
+        var resolved = resolveObject( words, gameState.currentRoom );
+        if ( !isSimpleValue( resolved ) ) {
+            if ( resolved.keyExists( "candidates" ) ) {
+                gameState.pendingPrompt = {
+                    "type" : "disambiguate", "verb" : prompt.verb,
+                    "resumeKind" : prompt.kind == "two" ? "twoDirect" : prompt.kind,
+                    "obj2Words" : prompt.kind == "two" ? prompt.obj2Words : [],
+                    "candidates" : resolved.candidates
+                };
+                return { "message" : resolved.error, "stillPending" : true };
+            }
+            return { "message" : resolved.error, "stillPending" : false, "executed" : false };
+        }
+        resultText = prompt.kind == "two"
+            ? finishTwoObjectVerb( prompt.verb, objects[ resolved ], prompt.obj2Words )
+            : dispatchByKind( prompt.verb, prompt.kind, objects[ resolved ] );
+
+    } else if ( prompt.type == "orphanIndirect" ) {
+        var indirectWords = tokenize( input ).filter( (w) => !NOISE_WORDS.contains( w ) );
+        if ( indirectWords.isEmpty() ) {
+            return { "message" : "Never mind.", "stillPending" : false, "executed" : false };
+        }
+        resultText = finishTwoObjectVerb( prompt.verb, objects[ prompt.directObjectId ], indirectWords );
+
+    } else if ( prompt.type == "disambiguate" ) {
+        var matches = matchAnswerAgainstCandidates( input, prompt.candidates );
+        if ( matches.len() != 1 ) {
+            return { "message" : "I still can't tell which one you mean.", "stillPending" : false, "executed" : false };
+        }
+        var chosenId = matches[ 1 ];
+        switch ( prompt.resumeKind ) {
+            case "one": case "smell": case "listen":
+                resultText = dispatchByKind( prompt.verb, prompt.resumeKind, objects[ chosenId ] );
+                break;
+            case "twoDirect":
+                resultText = finishTwoObjectVerb( prompt.verb, objects[ chosenId ], prompt.obj2Words );
+                break;
+            case "twoIndirect":
+                resultText = dispatchTwoObjectVerbCore( prompt.verb, objects[ prompt.directObjectId ], objects[ chosenId ] );
+                break;
+            default:
+                resultText = "I don't know how to do that yet.";
+        }
+
+    } else {
+        return { "message" : "Never mind.", "stillPending" : false, "executed" : false };
     }
 
-    gameState.turns += 1;
+    return {
+        "message" : resultText,
+        "stillPending" : gameState.pendingPrompt.type.len() > 0,
+        "executed" : !( gameState.pendingPrompt.type.len() > 0 )
+    };
+}
 
-    var result = dispatchCommand( input );
+// Splits a raw input line into independent command clauses on "." / "then"
+// (always) and "and" (only when it's joining two whole commands rather than
+// an object list — detected by checking whether the next word is itself a
+// known verb/direction; see ZIL's CLAUSE/PARSER). Returns an array of
+// word-arrays.
+function splitClauses(input) {
+    var tokens = reMatch( "[a-zA-Z']+|[.]", input.lcase() );
+    var clauses = [];
+    var current = [];
+    for ( var i = 1; i <= tokens.len(); i++ ) {
+        var t = tokens[ i ];
+        if ( t == "." || t == "then" ) {
+            if ( current.len() ) {
+                clauses.append( current );
+            }
+            current = [];
+            continue;
+        }
+        if ( t == "and" ) {
+            var next = i < tokens.len() ? tokens[ i + 1 ] : "";
+            if ( current.len() && ( VERB_INDEX.keyExists( next ) || DIRECTION_WORDS.keyExists( next ) ) ) {
+                clauses.append( current );
+                current = [];
+                continue;
+            }
+        }
+        current.append( t );
+    }
+    if ( current.len() ) {
+        clauses.append( current );
+    }
+    return clauses;
+}
+
+// The per-turn demon/fuse sequence, run once per actually-executed command
+// (not per clarifying question — see processClauseTurn()).
+function runTickSequence() {
+    var suffix = "";
 
     var riverNote = tickRiver();
     if ( riverNote.len() ) {
-        result &= NEWLINE & riverNote;
+        suffix &= NEWLINE & riverNote;
     }
 
     // KILL-INTERRUPTS: the thief and the lantern/match fuel timers are
@@ -2925,19 +3267,19 @@ function processCommand(input) {
     if ( !gameState.playerDead && gameState.deaths == 0 ) {
         var thiefNote = tickThief();
         if ( thiefNote.len() ) {
-            result &= NEWLINE & thiefNote;
+            suffix &= NEWLINE & thiefNote;
         }
     }
 
     if ( gameState.deaths == 0 ) {
         var lightFuelNote = tickLightFuel();
         if ( lightFuelNote.len() ) {
-            result &= NEWLINE & lightFuelNote;
+            suffix &= NEWLINE & lightFuelNote;
         }
 
         var matchNote = tickMatch();
         if ( matchNote.len() ) {
-            result &= NEWLINE & matchNote;
+            suffix &= NEWLINE & matchNote;
         }
     }
 
@@ -2948,30 +3290,110 @@ function processCommand(input) {
     if ( !gameState.playerDead ) {
         var grueNote = tickGrue();
         if ( grueNote.len() ) {
-            result &= NEWLINE & grueNote;
+            suffix &= NEWLINE & grueNote;
         }
     }
 
     var damNote = tickDam();
     if ( damNote.len() ) {
-        result &= NEWLINE & damNote;
+        suffix &= NEWLINE & damNote;
     }
 
     if ( !gameState.playerDead ) {
         var maintRoomNote = tickMaintRoom();
         if ( maintRoomNote.len() ) {
-            result &= NEWLINE & maintRoomNote;
+            suffix &= NEWLINE & maintRoomNote;
         }
     }
 
     if ( !gameState.playerDead ) {
         var endgameNote = checkEndgameTrigger();
         if ( endgameNote.len() ) {
-            result &= endgameNote;
+            suffix &= endgameNote;
         }
     }
 
-    return result;
+    return suffix;
+}
+
+// One full command clause: charges a turn and runs the tick sequence —
+// unless dispatching it only raised a clarifying question (orphan/
+// disambiguation), which ZIL doesn't charge a turn for.
+function processClauseTurn(clauseWords) {
+    gameState.turns += 1;
+    var result = dispatchCommand( clauseWords.toList( " " ) );
+
+    if ( gameState.pendingPrompt.type.len() > 0 ) {
+        gameState.turns -= 1;
+        return result;
+    }
+
+    return result & runTickSequence();
+}
+
+function processCommand(input) {
+    if ( gameState.playerDead ) {
+        return "You are dead. The game is over.";
+    }
+    if ( gameState.gameWon ) {
+        return "You have already won. The game is over.";
+    }
+
+    // Resume a pending orphan/disambiguation question — the whole line is
+    // the answer, not a fresh command.
+    if ( gameState.pendingPrompt.type.len() > 0 ) {
+        var resumed = resolvePendingPromptTurn( input );
+        if ( resumed.stillPending ) {
+            return resumed.message;
+        }
+        gameState.turns += 1;
+        return resumed.message & runTickSequence();
+    }
+
+    var trimmedLower = input.trim().lcase();
+    var inputWords = tokenize( trimmedLower );
+
+    // OOPS <word>: rebuild the last command with its bad word replaced.
+    if ( inputWords.len() && inputWords[ 1 ] == "oops" ) {
+        if ( inputWords.len() < 2 ) {
+            return "Sorry, what word do you want to fix?";
+        }
+        if ( !gameState.lastUnknownWord.len() || !gameState.lastRawInput.len() ) {
+            return "I don't know what to fix.";
+        }
+        var fixedWord = inputWords[ 2 ];
+        var badWord = gameState.lastUnknownWord;
+        var rebuiltWords = tokenize( gameState.lastRawInput ).map( (w) => w == badWord ? fixedWord : w );
+        gameState.lastUnknownWord = "";
+        return processCommand( rebuiltWords.toList( " " ) );
+    }
+
+    // AGAIN/G: replay the last fully-dispatched command line verbatim.
+    if ( [ "again", "g" ].contains( trimmedLower ) ) {
+        if ( !gameState.lastRawInput.len() ) {
+            return "I don't know what to repeat yet.";
+        }
+        return processCommand( gameState.lastRawInput );
+    }
+
+    var clauses = splitClauses( input );
+    gameState.lastRawInput = input;
+
+    if ( clauses.isEmpty() ) {
+        return processClauseTurn( [] );
+    }
+    if ( clauses.len() == 1 ) {
+        return processClauseTurn( clauses[ 1 ] );
+    }
+
+    var outputs = [];
+    for ( var clause in clauses ) {
+        outputs.append( processClauseTurn( clause ) );
+        if ( gameState.playerDead || gameState.gameWon || gameState.pendingPrompt.type.len() > 0 ) {
+            break;
+        }
+    }
+    return outputs.toList( NEWLINE & NEWLINE );
 }
 
 function runDemo() {
