@@ -53,7 +53,8 @@ ZERO_OBJECT_VERBS = [ "look", "inventory", "pray", "score", "diagnose", "launch"
 ONE_OBJECT_VERBS = [
     "examine", "take", "drop", "open", "close", "read", "drink", "eat", "climb",
     "wave", "ring", "wind", "push", "board", "search", "light", "extinguish",
-    "turn_on", "turn_off", "raise", "lower"
+    "turn_on", "turn_off", "raise", "lower",
+    "kick", "cut", "look_under", "follow", "wake", "answer"
 ];
 
 // Verbs taking a direct object and an optional/required indirect object,
@@ -122,7 +123,13 @@ VERB_SYNONYMS = {
     "lower"      : [ "lower" ],
     "rub"        : [ "rub" ],
     "throw"      : [ "throw", "hurl", "chuck", "toss" ],
-    "save"       : [ "save" ]
+    "save"       : [ "save" ],
+    "kick"       : [ "kick", "taunt" ],
+    "cut"        : [ "cut", "slice", "pierce" ],
+    "look_under" : [ "look under" ],
+    "follow"     : [ "follow", "pursue", "chase", "come" ],
+    "wake"       : [ "wake", "wake up", "awake", "surprise", "startle" ],
+    "answer"     : [ "answer", "reply" ]
 };
 
 gameState = {
@@ -1417,6 +1424,46 @@ function handleLower(obj) {
         return "The basket is lowered to the bottom of the shaft.";
     }
     return "You can't lower that.";
+}
+
+// V-KICK: pure HACK-HACK flavor stub in ZIL, no object-specific override.
+function handleKick(obj) {
+    return "Kicking the #obj.name# doesn't seem to help.";
+}
+
+// V-CUT: no WEAPONBIT/tool modeling for a "with" object in this port, so this
+// always falls to ZIL's generic "strange concept" line rather than the
+// weapon-specific branches in V-CUT.
+function handleCut(obj) {
+    return "Strange concept, cutting the #obj.name#....";
+}
+
+// V-LOOK-UNDER: ZIL's generic stub. (1actions.zil does override this for a
+// few specific objects — trap-door rug, leaf pile, rainbow — but those route
+// through each room/object's own F-routine, which this engine has no
+// equivalent hook for; out of scope here.)
+function handleLookUnder(obj) {
+    return "There is nothing but dust there.";
+}
+
+// V-FOLLOW: pure flavor stub in ZIL ("You're nuts!"). (1actions.zil's
+// SONGBIRD-F adds a FOLLOW override for the songbird, but that's a
+// room/object F-routine hook this engine doesn't have; out of scope here.)
+function handleFollow(obj) {
+    return "You're nuts!";
+}
+
+// V-ALARM/WAKE: ZIL's stub checks ACTORBIT and sleep state (STRENGTH < 0) to
+// pick between "rudely awakened", "wide awake", or "isn't sleeping" — none of
+// that state exists in this port, so this always reports the generic
+// non-actor/non-sleeping case.
+function handleWake(obj) {
+    return "The #obj.name# isn't sleeping.";
+}
+
+// V-REPLY/ANSWER: pure flavor stub in ZIL, no object-specific override.
+function handleAnswer(obj) {
+    return "It is hardly likely that the #obj.name# is interested.";
 }
 
 // MSWITCH-FUNCTION: turning on the coal mine's machine (clothes-dryer
@@ -2899,6 +2946,12 @@ function dispatchOneObjectVerb(verb, obj) {
         case "turn_off":   return handleExtinguish( obj );
         case "raise":      return handleRaise( obj );
         case "lower":      return handleLower( obj );
+        case "kick":       return handleKick( obj );
+        case "cut":        return handleCut( obj );
+        case "look_under": return handleLookUnder( obj );
+        case "follow":     return handleFollow( obj );
+        case "wake":       return handleWake( obj );
+        case "answer":     return handleAnswer( obj );
     }
     return "I don't know how to do that yet.";
 }
