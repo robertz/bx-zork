@@ -42,7 +42,7 @@ ZERO_OBJECT_VERBS = [ "look", "inventory", "pray", "score", "diagnose", "listen"
 ONE_OBJECT_VERBS = [
     "examine", "take", "drop", "open", "close", "read", "drink", "climb",
     "wave", "ring", "wind", "push", "board", "search", "light", "extinguish",
-    "turn_on", "turn_off", "raise", "lower", "rub"
+    "turn_on", "turn_off", "raise", "lower"
 ];
 
 // Verbs taking a direct object and an optional/required indirect object,
@@ -61,7 +61,8 @@ TWO_OBJECT_VERBS = {
     "dig"     : { "prepositions" : [ "with" ],                    "requireSecond" : false },
     "turn"    : { "prepositions" : [ "with" ],                    "requireSecond" : false },
     "attack"  : { "prepositions" : [ "with" ],                    "requireSecond" : false },
-    "throw"   : { "prepositions" : [ "at" ],                      "requireSecond" : false }
+    "throw"   : { "prepositions" : [ "at" ],                      "requireSecond" : false },
+    "rub"     : { "prepositions" : [ "with" ],                    "requireSecond" : false }
 };
 
 VERB_SYNONYMS = {
@@ -137,7 +138,8 @@ gameState = {
         "songSung"      : false, // SING-SONG: canary already wound in a forest room, bauble dropped
         "mirrorBroken"  : false, // MIRROR-MUNG: mirror smashed, disabling MIRROR-MIRROR teleport for both rooms
         "gateFlag"      : false, // GATE-FLAG: yellow button pushed, bolt now turns (bubble glows)
-        "gatesOpen"     : false  // GATES-OPEN: sluice gates currently open (lowTide follows 8 turns later)
+        "gatesOpen"     : false, // GATES-OPEN: sluice gates currently open (lowTide follows 8 turns later)
+        "ghost"         : false  // DEAD: died after visiting the Altar — ghost-limbo until PRAY there
     },
     // I-RFILL/I-REMPTY: turns left until the reservoir actually finishes
     // draining/refilling after the bolt is turned (0 = no transition in
@@ -296,6 +298,10 @@ function sliceWords(words, start, count) {
 // ZIL's LIGHT-INT: room is lit if it has a natural LFLAG (outdoor/above-ground)
 // or a lit, non-burned-out light source is in the room or carried by the player.
 function roomIsLit() {
+    // ALWAYS-LIT: a ghost's senses work regardless of light source or fuel.
+    if ( gameState.flags.ghost ) {
+        return true;
+    }
     var room = rooms[ gameState.currentRoom ];
     if ( room.keyExists( "lit" ) && room.lit ) {
         return true;
@@ -712,12 +718,18 @@ down, the songbird flies away.";
 // tingling message if rubbing it with something other than your bare hands;
 // this engine's "rub X" grammar has no indirect object yet, so that branch
 // doesn't apply.
-function handleRub(obj) {
+function handleRub(obj, indirect) {
     if ( ![ "mirror_1", "mirror_2" ].contains( obj.id ) ) {
         return "Rubbing the #obj.name# doesn't seem to accomplish anything.";
     }
     if ( gameState.flags.mirrorBroken ) {
         return "The mirror is broken into many pieces.";
+    }
+    // MIRROR-MIRROR's PRSI check: rubbing the mirror with something (this
+    // engine has no bare-hands object, so any indirect object qualifies)
+    // just tingles instead of triggering the teleport.
+    if ( isStruct( indirect ) ) {
+        return "You feel a faint tingling transmitted through the #indirect.name#.";
     }
 
     var otherRoomId = obj.id == "mirror_1" ? "mirror_room_2" : "mirror_room_1";
@@ -756,7 +768,81 @@ function handleListenVerb() {
 // automatically on entering the Altar without the coffin, but per this
 // task it's wired to the PRAY verb instead — praying at the Altar lifts
 // the curse as long as you aren't lugging the coffin around with you.
+// DEAD-FUNCTION's PRAY override: un-death only works at the Altar.
+function handleGhostPray() {
+    if ( gameState.currentRoom != "south_temple" ) {
+        return "Your prayers are not heard.";
+    }
+    gameState.flags.ghost = false;
+    // The death-time TROLL-FLAG override only stands if the troll was
+    // actually defeated; if he's still standing guard (strength > 0),
+    // un-death restores the danger (and the blocked passages) rather than
+    // leaving them open.
+    if ( objects.troll.location == "troll_room" && objects.troll.strength > 0 ) {
+        gameState.flags.trollFlag = false;
+    }
+    return "From the distance the sound of a lone trumpet is heard. The room
+becomes very bright and you feel disembodied. In a moment, the
+brightness fades and you find yourself rising as if from a long
+sleep, deep in the woods. In the distance you can faintly hear a
+songbird and the sounds of the forest." & NEWLINE & NEWLINE & enterRoom( "forest_1" );
+}
+
+// DEAD-FUNCTION's LOOK override: room looks "strange and unearthly," plus a
+// note about indistinct objects if any are actually here, plus a note that
+// the ghost can see fine even where the room itself has no natural light.
+function handleGhostLook() {
+    var room = rooms[ gameState.currentRoom ];
+    var hasObjects = false;
+    for ( var id in objects ) {
+        if ( objects[ id ].location == gameState.currentRoom && !objects[ id ].hidden ) {
+            hasObjects = true;
+            break;
+        }
+    }
+    var msg = "The room looks strange and unearthly" & ( hasObjects ? " and objects appear indistinct." : "." );
+    if ( !( room.keyExists( "lit" ) && room.lit ) ) {
+        msg &= NEWLINE & "Although there is no light, the room seems dimly illuminated.";
+    }
+    return msg;
+}
+
+// DEAD-FUNCTION: while a ghost, almost every verb is intercepted by the
+// player's own action override before its normal handler ever runs — the
+// physical world is simply out of reach. WALK/SAVE fall through untouched
+// (movement's own ghost special-case lives in handleGo(); SAVE works as
+// normal). Anything not listed here gets the generic "can't even do that."
+function handleGhostVerb(verb) {
+    switch ( verb ) {
+        case "attack":
+            return "All such attacks are vain in your condition.";
+        case "open": case "close": case "drink": case "inflate":
+        case "turn": case "burn": case "tie": case "rub":
+            return "Even such an action is beyond your capabilities.";
+        case "turn_on": case "turn_off":
+            return "You need no light to guide you.";
+        case "score":
+            return "You're dead! How can you think of your score?";
+        case "take":
+            return "Your hand passes through its object.";
+        case "drop": case "throw": case "inventory":
+            return "You have no possessions.";
+        case "diagnose":
+            return "You are dead.";
+        case "look":
+            return handleGhostLook();
+        case "pray":
+            return handleGhostPray();
+        case "save":
+            return "";
+    }
+    return "You can't even do that.";
+}
+
 function handlePray() {
+    if ( gameState.flags.ghost ) {
+        return handleGhostPray();
+    }
     if ( gameState.currentRoom == "south_temple" ) {
         if ( objects.coffin.location == "player" ) {
             return "Your prayers are not heard while you bear the weight of the coffin.";
@@ -1549,11 +1635,75 @@ CYCLOPS_MELEE = {
 
 MELEE_TABLES = { "TROLL_MELEE" : TROLL_MELEE, "THIEF_MELEE" : THIEF_MELEE, "CYCLOPS_MELEE" : CYCLOPS_MELEE };
 
-// JIGS-UP, minus the south-temple/Hades "DEAD" ghost-limbo branch and the
-// full RANDOMIZE-OBJECTS treasure scatter (see NOTES.md): the first
-// DEATH_LIMIT deaths cost SCORE_PENALTY_PER_DEATH points and resurrect you
-// in Forest-1 at FIGHT-STRENGTH 1 ("can't quite fix you up completely");
-// past that, death is permanent.
+// ABOVE-GROUND: where RANDOMIZE-OBJECTS dumps non-treasure carried items
+// on death.
+ABOVE_GROUND_ROOMS = [
+    "west_of_house", "north_of_house", "east_of_house", "south_of_house",
+    "forest_1", "forest_2", "forest_3", "path", "clearing", "grating_clearing",
+    "canyon_view"
+];
+
+// RANDOMIZE-OBJECTS: on death, the lamp and coffin go home regardless, the
+// sword loses its (latent) treasure value, and everything else still on the
+// player scatters — treasures into a random dark room (so they can be found
+// again), junk into a random above-ground room. Mirrors the ZIL routine's
+// AUX pointer that keeps advancing through the room list across multiple
+// scattered treasures in the same death, rather than re-rolling from the top
+// each time.
+function randomizeObjects() {
+    if ( objects.brass_lantern.location == "player" ) {
+        objects.brass_lantern.location = "living_room";
+    }
+    if ( objects.coffin.location == "player" ) {
+        objects.coffin.location = "egypt_room";
+    }
+    objects.sword.treasureValue = 0;
+
+    var darkRooms = [];
+    for ( var id in rooms ) {
+        if ( !( rooms[ id ].keyExists( "lit" ) && rooms[ id ].lit ) ) {
+            darkRooms.append( id );
+        }
+    }
+
+    var carried = [];
+    for ( var id in objects ) {
+        if ( objects[ id ].location == "player" ) {
+            carried.append( id );
+        }
+    }
+
+    var darkPtr = 0;
+    for ( var id in carried ) {
+        var obj = objects[ id ];
+        if ( obj.treasureValue > 0 ) {
+            var attempts = 0;
+            var placed = false;
+            while ( attempts < 200 && !placed ) {
+                attempts += 1;
+                darkPtr = ( darkPtr % darkRooms.len() ) + 1;
+                if ( randRange( 1, 100 ) <= 50 ) {
+                    obj.location = darkRooms[ darkPtr ];
+                    placed = true;
+                }
+            }
+            if ( !placed ) {
+                obj.location = darkRooms[ randRange( 1, darkRooms.len() ) ];
+            }
+        } else {
+            obj.location = ABOVE_GROUND_ROOMS[ randRange( 1, ABOVE_GROUND_ROOMS.len() ) ];
+        }
+    }
+}
+
+// KILL-INTERRUPTS: permanently silences the thief and the lantern/candle/
+// match fuel timers after the first death (and snuffs any match currently
+// burning) — checked via gameState.deaths in processCommand() rather than a
+// disable flag per-demon.
+function killInterrupts() {
+    objects.match.on = false;
+}
+
 function endGame(message) {
     gameState.baseScore -= SCORE_PENALTY_PER_DEATH;
 
@@ -1567,19 +1717,30 @@ Land of the Living Dead, where your fellow adventurers may gloat over them." &
     }
 
     gameState.deaths += 1;
-    if ( objects.brass_lantern.location == "player" ) {
-        objects.brass_lantern.location = "living_room";
-    }
-    if ( objects.coffin.location == "player" ) {
-        objects.coffin.location = "egypt_room";
-    }
-    gameState.playerStrengthAdjustment = 1 - fightStrength( false );
-    gameState.cureTimer = gameState.playerStrengthAdjustment < 0 ? CURE_WAIT : 0;
+    var ghostLimbo = rooms.south_temple.keyExists( "touched" ) && rooms.south_temple.touched;
+    randomizeObjects();
+    killInterrupts();
 
-    return message & NEWLINE & NEWLINE & "    ****  You have died  ****" & NEWLINE & NEWLINE &
-        "Now, let's take a look here..." & NEWLINE &
-        "Well, you probably deserve another chance.  I can't quite fix you up completely,
+    var resurrectText = "";
+    if ( ghostLimbo ) {
+        gameState.flags.ghost = true;
+        gameState.flags.trollFlag = true;
+        resurrectText =
+            "As you take your last breath, you feel relieved of your burdens. The
+feeling passes as you find yourself before the gates of Hell, where
+the spirits jeer at you and deny you entry.  Your senses are
+disturbed.  The objects in the dungeon appear indistinct, bleached of
+color, even unreal." & NEWLINE & NEWLINE & enterRoom( "entrance_to_hades" );
+    } else {
+        gameState.playerStrengthAdjustment = 1 - fightStrength( false );
+        gameState.cureTimer = gameState.playerStrengthAdjustment < 0 ? CURE_WAIT : 0;
+        resurrectText =
+            "Now, let's take a look here..." & NEWLINE &
+            "Well, you probably deserve another chance.  I can't quite fix you up completely,
 but you can't have everything." & NEWLINE & NEWLINE & enterRoom( "forest_1" );
+    }
+
+    return message & NEWLINE & NEWLINE & "    ****  You have died  ****" & NEWLINE & NEWLINE & resurrectText;
 }
 
 function endGameWin(message) {
@@ -1741,6 +1902,17 @@ function tickMaintRoom() {
         if ( hereNow ) {
             return endGame( "I'm afraid you have done drowned yourself." );
         }
+        return note;
+    }
+    // VEHBIT/INFLATED-BOAT check: while the leak is still rising (hasn't
+    // hit full flood yet), being boated anywhere in the dam complex is
+    // fatal on its own — the current sweeps the boat over the dam and
+    // falls before the room itself ever finishes flooding.
+    if ( gameState.boardedVehicle.len() &&
+         ( gameState.currentRoom == "maintenance_room" || gameState.currentRoom == "dam_room" ||
+           gameState.currentRoom == "dam_lobby" ) ) {
+        return endGame( "The rising water carries the boat over the dam, down the river, and over
+the falls.  Tsk, tsk." );
     }
     return note;
 }
@@ -2284,6 +2456,10 @@ when it gets to the next room."
 function enterRoom(roomId) {
     gameState.currentRoom = roomId;
     var room = rooms[ roomId ];
+    // TOUCHBIT: has the player ever been here. Only south_temple's value is
+    // actually read (JIGS-UP's ghost-limbo branch), but set it everywhere
+    // for consistency.
+    room.touched = true;
     if ( room.keyExists( "onEnter" ) ) {
         var hookResult = room.onEnter();
         // Most onEnter hooks are side-effect-only (flip a flag, reveal an
@@ -2299,6 +2475,12 @@ function enterRoom(roomId) {
 function handleGo(direction) {
     if ( direction == "land" ) {
         return handleLand();
+    }
+
+    // DEAD-FUNCTION's one WALK override: a ghost can't squeeze through the
+    // narrow passage west of the Timber Room.
+    if ( gameState.flags.ghost && gameState.currentRoom == "timber_room" && direction == "west" ) {
+        return "You cannot enter in your condition.";
     }
 
     // VEHBIT check (RBOAT-FUNCTION's M-BEG WALK handling): once aboard the
@@ -2395,7 +2577,6 @@ function dispatchOneObjectVerb(verb, obj) {
         case "turn_off":   return handleExtinguish( obj );
         case "raise":      return handleRaise( obj );
         case "lower":      return handleLower( obj );
-        case "rub":        return handleRub( obj );
     }
     return "I don't know how to do that yet.";
 }
@@ -2454,6 +2635,7 @@ function dispatchTwoObjectVerb(verb, restWords) {
         case "turn":    return handleTurn( obj1, indirect );
         case "attack":  return handleAttack( obj1, indirect );
         case "throw":   return handleThrow( obj1, indirect );
+        case "rub":     return handleRub( obj1, indirect );
     }
     return "I don't know how to do that yet.";
 }
@@ -2479,6 +2661,15 @@ function dispatchCommand(input) {
     if ( verb == "go" ) {
         var directionWord = rest.filter( (w) => DIRECTION_WORDS.keyExists( w ) );
         return directionWord.len() ? handleGo( DIRECTION_WORDS[ directionWord[ 1 ] ] ) : "Go where?";
+    }
+
+    // DEAD-FUNCTION: as a ghost, every verb but WALK/SAVE is intercepted
+    // here before any normal dispatch (object resolution included).
+    if ( gameState.flags.ghost ) {
+        var ghostResult = handleGhostVerb( verb );
+        if ( ghostResult.len() ) {
+            return ghostResult;
+        }
     }
 
     if ( ZERO_OBJECT_VERBS.contains( verb ) ) {
@@ -2538,21 +2729,25 @@ function processCommand(input) {
         result &= NEWLINE & riverNote;
     }
 
-    if ( !gameState.playerDead ) {
+    // KILL-INTERRUPTS: the thief and the lantern/match fuel timers are
+    // permanently disabled after the first death.
+    if ( !gameState.playerDead && gameState.deaths == 0 ) {
         var thiefNote = tickThief();
         if ( thiefNote.len() ) {
             result &= NEWLINE & thiefNote;
         }
     }
 
-    var lightFuelNote = tickLightFuel();
-    if ( lightFuelNote.len() ) {
-        result &= NEWLINE & lightFuelNote;
-    }
+    if ( gameState.deaths == 0 ) {
+        var lightFuelNote = tickLightFuel();
+        if ( lightFuelNote.len() ) {
+            result &= NEWLINE & lightFuelNote;
+        }
 
-    var matchNote = tickMatch();
-    if ( matchNote.len() ) {
-        result &= NEWLINE & matchNote;
+        var matchNote = tickMatch();
+        if ( matchNote.len() ) {
+            result &= NEWLINE & matchNote;
+        }
     }
 
     if ( !gameState.playerDead ) {
