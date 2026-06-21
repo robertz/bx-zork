@@ -39,12 +39,17 @@ Directions: `north`/`n`, `south`/`s`, `east`/`e`, `west`/`w`, `ne`, `nw`, `se`, 
 | Arity | Verbs |
 |---|---|
 | No object | `look` (`l`), `inventory` (`i`/`inv`), `score`, `pray`, `diagnose`, `listen`, `launch`, `odysseus`/`ulysses`, `save` |
-| One object | `examine`/`x`/`inspect`, `take`/`get`/`grab`, `drop`, `open`, `close`/`shut`, `read`, `drink`/`sip`, `climb`/`scale`, `wave`/`shake`, `ring`, `wind`, `push`/`move`/`shove`, `board`, `search`, `light`, `extinguish`/`douse`, `turn on`, `turn off`, `raise`/`lift`, `lower`, `rub`, `smell`/`sniff` (also works with no object) |
+| One object | `examine`/`x`/`inspect`, `take`/`get`/`grab`, `drop`, `open`, `close`/`shut`, `read`, `eat`, `drink`/`sip`, `climb`/`scale`, `wave`/`shake`, `ring`, `wind`, `push`/`move`/`shove`, `board`, `search`, `light`, `extinguish`/`douse`, `turn on`, `turn off`, `raise`/`lift`, `lower`, `rub`, `kick`/`taunt`, `cut`/`slice`/`pierce`, `look under`, `follow`/`pursue`/`chase`, `wake`/`wake up`, `answer`/`reply`, `smell`/`sniff` (also works with no object) |
 | Two objects (`verb X <prep> Y`) | `give X to Y`, `put X in/into/on/onto Y`, `tie X to Y`, `unlock X with Y`, `lock X with Y`, `pour X on/onto/in/into Y`, `fill X with Y`, `inflate X with Y`, `burn X with Y`, `dig X with Y`, `turn X with Y`, `attack X with Y` |
 
 Also: `land` (come ashore while boating the river), `throw X` / `throw X at Y`
 (drops the object, or has the target duck — smashes the brass lantern if thrown,
 breaks the egg if thrown at anything). `quit`/`exit` ends an interactive session.
+
+Parser shortcuts: pronouns (`it`/`him`/`her`/`them` refer to the last named object),
+`again`/`g` repeats the last command, `oops <word>` corrects the last unknown word,
+`all` and `all but <noun>` work with `take`/`drop`. Multiple commands can be chained
+with `.` or `then` (`take lamp. turn it on`).
 
 ## How a command becomes a result
 
