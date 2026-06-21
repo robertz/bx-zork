@@ -35,12 +35,13 @@ DIRECTION_WORDS = {
 };
 
 // Verbs taking no object at all.
-ZERO_OBJECT_VERBS = [ "look", "inventory", "pray", "score", "diagnose", "listen", "launch", "odysseus", "save" ];
+ZERO_OBJECT_VERBS = [ "look", "inventory", "pray", "score", "diagnose", "launch", "odysseus", "save" ];
 
 // Verbs taking exactly one object (an empty noun phrase is an error, except
-// "smell" which is handled separately since it's valid with or without one).
+// "smell"/"listen" which are handled separately since they're valid with or
+// without one).
 ONE_OBJECT_VERBS = [
-    "examine", "take", "drop", "open", "close", "read", "drink", "climb",
+    "examine", "take", "drop", "open", "close", "read", "drink", "eat", "climb",
     "wave", "ring", "wind", "push", "board", "search", "light", "extinguish",
     "turn_on", "turn_off", "raise", "lower"
 ];
@@ -76,6 +77,7 @@ VERB_SYNONYMS = {
     "read"       : [ "read" ],
     "go"         : [ "go", "walk" ],
     "drink"      : [ "drink", "sip" ],
+    "eat"        : [ "eat" ],
     "climb"      : [ "climb", "scale" ],
     "dig"        : [ "dig" ],
     "pray"       : [ "pray" ],
@@ -456,7 +458,7 @@ function handleExamine(obj) {
     }
     var description = obj.desc.len() ? obj.desc : "There's nothing special about the #obj.name#.";
     if ( obj.container && ( obj.open || obj.transparent ) ) {
-        var contents = objects.keyArray().filter( (id) => objects[ id ].location == obj.id );
+        var contents = objects.keyArray().filter( (id) => objects[ id ].location == obj.id && !objects[ id ].hidden );
         if ( contents.len() ) {
             description &= NEWLINE & "The #obj.name# contains:" & NEWLINE &
                 contents.map( (id) => "  " & objects[ id ].name ).toList( NEWLINE );
@@ -542,7 +544,7 @@ function handleOpen(obj) {
         return obj.openMessage;
     }
     if ( obj.container ) {
-        var contents = objects.keyArray().filter( (id) => objects[ id ].location == obj.id );
+        var contents = objects.keyArray().filter( (id) => objects[ id ].location == obj.id && !objects[ id ].hidden );
         if ( contents.len() ) {
             return "Opening the #obj.name# reveals " &
                 contents.map( (id) => article( objects[ id ].name ) & " " & objects[ id ].name ).toList( ", " ) & ".";
@@ -604,11 +606,54 @@ function carriedIds() {
     return objects.keyArray().filter( (id) => objects[ id ].location == "player" );
 }
 
-function handleDrink(obj) {
-    if ( !obj.drinkable ) {
-        return "You can't drink that.";
+// V-EAT, shared by both the EAT and DRINK verbs exactly as ZIL does it
+// (V-DRINK is literally <V-EAT>): a FOODBIT item (lunch/garlic) just needs
+// to be held — DRINK on one is rebuffed ("How can you drink that?") rather
+// than eaten. A DRINKBIT item (water) needs an accessible source instead:
+// global water (streams/river glimpsed from the room) drinks freely, but
+// the bottled water needs its container actually held and open first.
+// Anything else gets the same generic brush-off regardless of verb. A
+// successful eat/drink consumes the item (REMOVE-CAREFULLY) — it doesn't
+// just sit there to be eaten/drunk again.
+function handleEatOrDrink(obj, verb) {
+    if ( obj.food ) {
+        if ( obj.location != "player" ) {
+            var holder = objects[ obj.location ];
+            if ( !isStruct( holder ) || holder.location != "player" ) {
+                return "You're not holding that.";
+            }
+        }
+        if ( verb == "drink" ) {
+            return "How can you drink that?";
+        }
+        obj.location = "";
+        return "Thank you very much. It really hit the spot.";
     }
-    return "Thank you very much. I was rather thirsty (from all this talking).";
+    if ( obj.drinkable ) {
+        if ( obj.id != "global_water" ) {
+            var container = objects[ obj.location ];
+            if ( !isStruct( container ) ) {
+                return "There isn't any water here.";
+            }
+            if ( container.location != "player" ) {
+                return "You have to be holding the #container.name# first.";
+            }
+            if ( !container.open ) {
+                return "You'll have to open the #container.name# first.";
+            }
+        }
+        obj.location = "";
+        return "Thank you very much. I was rather thirsty (from all this talking, probably).";
+    }
+    return "I don't think that the #obj.name# would agree with you.";
+}
+
+function handleDrink(obj) {
+    return handleEatOrDrink( obj, "drink" );
+}
+
+function handleEat(obj) {
+    return handleEatOrDrink( obj, "eat" );
 }
 
 // ZIL distinguishes CLIMB-UP/CLIMB-DOWN by grammar; this collapses both to
@@ -756,11 +801,53 @@ function handleSearch(obj) {
     return handleExamine( obj );
 }
 
-function handleSmell(name) {
-    return "You smell nothing unusual" & ( name.len() ? " about the #name#." : "." );
+// Rooms where the coal-gas odor (SMELLY-ROOM/GAS-ROOM's "GAS"/"ODOR"
+// PSEUDO-object, GAS-PSEUDO) is the ambient smell — this engine has no
+// pseudo-object vocabulary, so it's only reachable via bare "smell" here
+// rather than "smell gas"/"smell odor" too.
+GAS_SMELL_ROOMS = [ "smelly_room", "gas_room" ];
+
+// V-SMELL: generic case just names the object back at you (SANDWICH-BAG-FCN
+// and GAS-PSEUDO are the two object/room-specific overrides this engine
+// implements). ZIL has no bare "SMELL" syntax at all (object required) —
+// bare "smell" here falls back to the room's ambient odor, if any, else the
+// generic "nothing unusual."
+function handleSmell(obj) {
+    if ( !isStruct( obj ) ) {
+        if ( GAS_SMELL_ROOMS.contains( gameState.currentRoom ) ) {
+            return "It smells like coal gas in here.";
+        }
+        return "You smell nothing unusual.";
+    }
+    if ( obj.id == "sandwich_bag" && objects.lunch.location == "sandwich_bag" ) {
+        return "It smells of hot peppers.";
+    }
+    return "It smells like a #obj.name#.";
 }
 
-function handleListenVerb() {
+// V-LISTEN only exists as "LISTEN TO/FOR OBJECT" in ZIL (no bare syntax),
+// and almost every interesting response is per-actor (TROLL-FCN/
+// CYCLOPS-ROOM-FCN/THIEF-FCN) or per-room (FOREST-F). Bare "listen" here is
+// this engine's own convenience fallback to ambient forest flavor, else the
+// generic "nothing unusual."
+function handleListenVerb(obj) {
+    if ( isStruct( obj ) ) {
+        switch ( obj.id ) {
+            case "troll":
+                return "Every so often the troll says something, probably uncomplimentary, in
+his guttural tongue.";
+            case "cyclops":
+                return "You can hear his stomach rumbling.";
+            case "thief":
+                return "The thief says nothing, as you have not been formally introduced.";
+            case "songbird":
+                return "You can't hear the songbird now.";
+        }
+        return "The #obj.name# makes no sound.";
+    }
+    if ( FOREST_ROOMS.contains( gameState.currentRoom ) ) {
+        return "The pines and the hemlocks seem to be murmuring.";
+    }
     return "You hear nothing unusual.";
 }
 
@@ -816,7 +903,7 @@ function handleGhostVerb(verb) {
     switch ( verb ) {
         case "attack":
             return "All such attacks are vain in your condition.";
-        case "open": case "close": case "drink": case "inflate":
+        case "open": case "close": case "drink": case "eat": case "inflate":
         case "turn": case "burn": case "tie": case "rub":
             return "Even such an action is beyond your capabilities.";
         case "turn_on": case "turn_off":
@@ -2116,6 +2203,13 @@ backwards trying to duck, and break your neck, justice being swift and
 merciful in the Great Underground Empire." );
     }
 
+    if ( isStruct( indirect ) && indirect.id == "troll" ) {
+        var trollResult = trollGiveOrThrow( obj, "throw" );
+        if ( trollResult.len() ) {
+            return trollResult;
+        }
+    }
+
     if ( isStruct( indirect ) && indirect.actor ) {
         obj.location = gameState.currentRoom;
         return "The #indirect.name# ducks as the #obj.name# flies by and crashes to the ground.";
@@ -2236,12 +2330,59 @@ falls fast asleep (what did you put in that drink, anyway?).";
     return "The cyclops is not so stupid as to eat THAT!";
 }
 
+// TROLL-FCN's GIVE/THROW handling: only fires while he's alive and present.
+// Returning his own axe calms him into taking it back; any other knife/
+// sword/axe has a 1-in-5 chance of being his last meal (kills him outright,
+// opening the room for good, same as a combat win) or otherwise gets thrown
+// right back at you; anything else is just eaten and gone for good. Shared
+// by handleGive and handleThrow since ZIL's TROLL-FCN treats <VERB? THROW
+// GIVE> identically.
+function trollGiveOrThrow(obj, verb) {
+    if ( objects.troll.location != gameState.currentRoom || objects.troll.strength <= 0 ) {
+        return "";
+    }
+
+    if ( obj.id == "axe" ) {
+        objects.axe.location = "troll_room";
+        objects.axe.hidden = true;
+        return "The troll scratches his head in confusion, then takes the axe.";
+    }
+
+    var verbPhrase = verb == "throw"
+        ? "The troll, who is remarkably coordinated, catches the #obj.name#"
+        : "The troll, who is not overly proud, graciously accepts the gift";
+
+    if ( [ "knife", "sword", "axe" ].contains( obj.id ) ) {
+        if ( randRange( 1, 100 ) <= 20 ) {
+            obj.location = "";
+            objects.troll.location = "";
+            objects.troll.strength = 0;
+            gameState.flags.trollFlag = true;
+            return verbPhrase & " and eats it hungrily. Poor troll, he dies from an internal
+hemorrhage and his carcass disappears in a sinister black fog.";
+        }
+        obj.location = gameState.currentRoom;
+        return verbPhrase & " and, being for the moment sated, throws it back. Fortunately, the
+troll has poor control, and the #obj.name# falls to the floor. He does
+not look pleased.";
+    }
+
+    obj.location = "";
+    return verbPhrase & " and not having the most discriminating tastes, gleefully eats it.";
+}
+
 function handleGive(obj, indirect) {
     if ( obj.location != "player" ) {
         return "You don't have that.";
     }
     if ( indirect.id == "cyclops" ) {
         return handleGiveCyclops( obj );
+    }
+    if ( indirect.id == "troll" ) {
+        var trollResult = trollGiveOrThrow( obj, "give" );
+        if ( trollResult.len() ) {
+            return trollResult;
+        }
     }
     if ( !indirect.actor ) {
         return "You can't give things to the #indirect.name#.";
@@ -2348,12 +2489,42 @@ function handleLock(obj, indirect) {
     return "The #indirect.name# doesn't fit the lock.";
 }
 
+// V-POUR-ON: pouring putty onto something is really PUT PUTTY ON X under
+// the hood, so it reuses the same fixMaintLeak/fixBoat handling as "put".
+// Otherwise only water can be poured: onto an open flame (candles/torch —
+// not the battery-powered lamp) it's FLAMING? and gets extinguished;
+// anywhere else it just spills onto the ground and evaporates.
 function handlePour(obj, indirect) {
-    if ( obj.location != "player" ) {
-        return "You aren't holding that.";
+    if ( obj.id == "putty" ) {
+        if ( obj.location != "player" ) {
+            return "You aren't holding that.";
+        }
+        if ( isStruct( indirect ) ) {
+            if ( indirect.id == "leak" ) {
+                return fixMaintLeak();
+            }
+            if ( indirect.id == "punctured_boat" ) {
+                return fixBoat();
+            }
+        }
+        return "You can't pour that.";
     }
     if ( !obj.drinkable ) {
         return "You can't pour that.";
+    }
+    // Water always sits inside the bottle (never directly held), so this
+    // checks the container is held, not the water object itself — same as
+    // the global_water exception in handleDrink.
+    if ( obj.id != "global_water" ) {
+        var container = objects[ obj.location ];
+        if ( !isStruct( container ) || container.location != "player" ) {
+            return "You aren't holding that.";
+        }
+    }
+    if ( isStruct( indirect ) && [ "candles", "torch" ].contains( indirect.id ) && indirect.on ) {
+        indirect.on = false;
+        obj.location = "";
+        return "The #indirect.name# is extinguished.";
     }
     obj.location = gameState.currentRoom;
     return "You pour the #obj.name# onto the ground.";
@@ -2564,6 +2735,7 @@ function dispatchOneObjectVerb(verb, obj) {
         case "close":      return handleClose( obj );
         case "read":       return handleRead( obj );
         case "drink":      return handleDrink( obj );
+        case "eat":        return handleEat( obj );
         case "climb":      return handleClimb( obj );
         case "wave":       return handleWave( obj );
         case "ring":       return handleRing( obj );
@@ -2679,7 +2851,6 @@ function dispatchCommand(input) {
             case "pray":      return handlePray();
             case "score":     return handleScore();
             case "diagnose":  return handleDiagnose();
-            case "listen":    return handleListenVerb();
             case "launch":    return handleLaunch();
             case "odysseus":  return handleOdysseus();
             case "save":      return handleSave();
@@ -2690,8 +2861,28 @@ function dispatchCommand(input) {
         if ( rest.isEmpty() ) {
             return handleSmell( "" );
         }
+        // GAS-PSEUDO: "GAS"/"ODOR" are pseudo-object nouns local to the
+        // Smelly/Gas Rooms in ZIL — not real objects, so not resolvable via
+        // resolveObject. Elsewhere those words just fall through to the
+        // normal "I don't know that word" handling below, same as ZIL.
+        if ( rest.len() == 1 && [ "gas", "odor" ].contains( rest[ 1 ] ) && GAS_SMELL_ROOMS.contains( gameState.currentRoom ) ) {
+            return "It smells like coal gas in here.";
+        }
         var smelled = resolveObject( rest, gameState.currentRoom );
-        return isSimpleValue( smelled ) ? handleSmell( objects[ smelled ].name ) : smelled.error;
+        return isSimpleValue( smelled ) ? handleSmell( objects[ smelled ] ) : smelled.error;
+    }
+
+    // "LISTEN TO/FOR OBJECT" in ZIL syntax; strip a leading "to"/"for" if
+    // present, but a bare noun phrase ("listen troll") also works here.
+    if ( verb == "listen" ) {
+        var listenRest = rest.len() && [ "to", "for" ].contains( rest[ 1 ] )
+            ? sliceWords( rest, 2, rest.len() - 1 )
+            : rest;
+        if ( listenRest.isEmpty() ) {
+            return handleListenVerb( "" );
+        }
+        var heard = resolveObject( listenRest, gameState.currentRoom );
+        return isSimpleValue( heard ) ? handleListenVerb( objects[ heard ] ) : heard.error;
     }
 
     if ( TWO_OBJECT_VERBS.keyExists( verb ) ) {
