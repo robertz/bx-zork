@@ -195,7 +195,14 @@ gameState = {
     // GRUE-FUNCTION's turn counter: increments each turn you spend in
     // darkness, resets to 0 when you re-enter light. The grue first fires
     // after 2 dark turns (matching ZIL's INT-DEF I-GRUE delay of 2).
-    "grueCounter" : 0
+    "grueCounter" : 0,
+    // CYCLOWRATH (I-CYCLOPS): the cyclops's anger meter. Once provoked
+    // (kicked/attacked/burned/munged/thrown-at), it moves 1 step away from 0
+    // every turn the player lingers in the Cyclops Room; abs(cyclowrath) > 5
+    // means he's grabbed and eaten you. Negative values track the
+    // hot-peppers/thirsty branch instead of straight anger, exactly like
+    // ZIL's signed counter.
+    "cyclowrath" : 0
 };
 
 function buildVerbIndex() {
@@ -1900,6 +1907,31 @@ function tickLightFuel() {
     return notes.toList( NEWLINE );
 }
 
+// CAVE2-ROOM's M-END case: leaving the Cave (tiny_cave, ZIL's CAVE-2/
+// TINY-CAVE) while carrying lit candles has a 50/80 (i.e. 50%) chance of a
+// gust blowing them out. roomBefore is the room the player was in before
+// this command was dispatched; only fires if that room was tiny_cave and the
+// player actually left it (any direction — ZIL's CAVE2-ROOM doesn't check
+// which exit was taken).
+function tickCandleGust(roomBefore) {
+    if ( roomBefore != "tiny_cave" || gameState.currentRoom == "tiny_cave" ) {
+        return "";
+    }
+    if ( objects.candles.location != "player" || !objects.candles.on ) {
+        return "";
+    }
+    if ( randRange( 1, 100 ) > 50 ) {
+        return "";
+    }
+
+    objects.candles.on = false;
+    var note = "A gust of wind blows out your candles!";
+    if ( !roomIsLit() ) {
+        note &= NEWLINE & "It is now completely dark." ;
+    }
+    return note;
+}
+
 // MATCH-FUNCTION's 2-turn burn: a struck match goes out on its own unless
 // extinguished first.
 function tickMatch() {
@@ -2231,6 +2263,47 @@ function handleOdysseus() {
 by knocking down the wall on the east of the room.";
     }
     return "Wasn't he a sailor?";
+}
+
+// CYCLOMAD: the message progression I-CYCLOPS prints, indexed by
+// abs(cyclowrath) - 1 (1..6, the last entry being the final warning printed
+// the turn before he actually grabs you).
+CYCLOMAD = [
+    "The cyclops seems somewhat agitated.",
+    "The cyclops appears to be getting more agitated.",
+    "The cyclops is moving about the room, looking for something.",
+    "The cyclops was looking for salt and pepper. No doubt they are
+condiments for his upcoming snack.",
+    "The cyclops is moving toward you in an unfriendly manner.",
+    "You have two choices: 1. Leave  2. Become dinner."
+];
+
+// I-CYCLOPS: the cyclops danger timer. Disabled outright once he's asleep
+// (cyclopsFlag/water) or gone (fled via odysseus, or dead). While he's awake
+// and the player lingers in the Cyclops Room, cyclowrath ticks one step
+// further from 0 every turn; once abs(cyclowrath) exceeds 5 he grabs and
+// eats the player (JIGS-UP in the original).
+function tickCyclops() {
+    if ( gameState.flags.cyclopsFlag || gameState.playerDead ) {
+        return "";
+    }
+    if ( gameState.currentRoom != "cyclops_room" || objects.cyclops.location != "cyclops_room" ) {
+        return "";
+    }
+
+    if ( abs( gameState.cyclowrath ) > 5 ) {
+        return endGame( "The cyclops, tired of all of your games and trickery, grabs you firmly.
+As he licks his chops, he says ""Mmm. Just like Mom used to make 'em.""
+It's nice to be appreciated." );
+    }
+
+    if ( gameState.cyclowrath < 0 ) {
+        gameState.cyclowrath -= 1;
+    } else {
+        gameState.cyclowrath += 1;
+    }
+
+    return CYCLOMAD[ abs( gameState.cyclowrath ) ];
 }
 
 // ---------------------------------------------------------------------
@@ -2913,7 +2986,14 @@ function processCommand(input) {
 
     gameState.turns += 1;
 
+    var roomBeforeCommand = gameState.currentRoom;
+
     var result = dispatchCommand( input );
+
+    var candleGustNote = tickCandleGust( roomBeforeCommand );
+    if ( candleGustNote.len() ) {
+        result &= NEWLINE & candleGustNote;
+    }
 
     var riverNote = tickRiver();
     if ( riverNote.len() ) {
@@ -2949,6 +3029,13 @@ function processCommand(input) {
         var grueNote = tickGrue();
         if ( grueNote.len() ) {
             result &= NEWLINE & grueNote;
+        }
+    }
+
+    if ( !gameState.playerDead ) {
+        var cyclopsNote = tickCyclops();
+        if ( cyclopsNote.len() ) {
+            result &= NEWLINE & cyclopsNote;
         }
     }
 
