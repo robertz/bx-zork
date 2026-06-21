@@ -2309,6 +2309,11 @@ function onVillainDefeated(villainId, outcome) {
             return "An unconscious troll is sprawled on the floor. All passages
 out of the room are open.";
         }
+        if ( villainId == "thief" ) {
+            objects.stiletto.location = gameState.currentRoom;
+            objects.stiletto.hidden = false;
+            objects.thief.desc = "There is a suspicious-looking individual lying unconscious on the ground.";
+        }
         return "The #name# is knocked out cold.";
     }
 
